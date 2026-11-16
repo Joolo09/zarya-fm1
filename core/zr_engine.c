@@ -8,7 +8,7 @@ zr_project zr_proj;
 zr_status_t zr_status;
 zr_live_t zr_live;
 
-enum { QSIZE = 64, MOSIZE = 32, OFFS = 8, HELD = 8 };
+enum { QSIZE = 64, MOSIZE = 32, OFFS = 8, HELD = 8, PHRASE = 32, ANSWERS = 24 };
 typedef struct { volatile uint16_t w, r; volatile uint32_t e[QSIZE]; } queue_t;
 static queue_t queues[2];
 static struct { volatile uint16_t w, r; volatile uint32_t e[MOSIZE]; } midi_out;
@@ -35,6 +35,13 @@ static struct {
     uint32_t rng, age;
     uint8_t playing, tempo_seen, swing_seen, voice_limit, hot;
     uint32_t clk_q8;
+    /* live intelligence: phrase memory (CAPTURE, DUET) and the PURE tuner */
+    struct { uint32_t pos8; uint16_t dur8; uint8_t note, vel, track, open; } ph[PHRASE];
+    struct { uint32_t at8; uint16_t dur8; uint8_t note, vel, track, pending; } ans[ANSWERS];
+    uint32_t free8, free_q8, call_start;
+    uint8_t ph_w, duet_state, duet_track, pure_amt;
+    uint16_t pure_mask;
+    int16_t pure_off[12];
 } E;
 
 static int32_t bus_mix[2 * ZR_BLOCK_FRAMES], bus_duck[2 * ZR_BLOCK_FRAMES];
@@ -75,6 +82,7 @@ void zr_engine_init(void)
     zr_zero(&zr_status, sizeof zr_status);
     zr_zero(&zr_live, sizeof zr_live);
     zr_live.scene_req = 0xff;
+    zr_status.pure_root = 0xff;
     E.rng = 0x1234abcd;
     E.voice_limit = ZR_VOICES;
     E.tempo_seen = 0xff;
@@ -225,9 +233,17 @@ ZR_AUDIO_CODE static void fire(unsigned track, const zr_step *st, uint32_t gate_
         return;
     }
     unsigned chord = (st->fx >> 3) & 7;
+    const uint8_t *g = zr_proj.g;
+    /* live chord: every sequenced note moves by scale degrees, chords are re-stacked in key */
+    unsigned deg = zr_live.degree % 7, base = st->note;
+    if (deg) base = zr_scale_shift(base, g[ZG_ROOT], g[ZG_SCALE], deg <= 3 ? (int)deg : (int)deg - 7);
     for (unsigned k = 0; k < 4; ++k) {
-        unsigned n = st->note + (k ? chord_iv[chord][k - 1] : 0);
-        if (k && !chord_iv[chord][k - 1]) break;
+        unsigned n = base;
+        if (k) {
+            if (!chord_iv[chord][k - 1]) break;
+            if (!deg || chord == 1) n = base + chord_iv[chord][k - 1];
+            else n = zr_scale_shift(base, g[ZG_ROOT], g[ZG_SCALE], chord == 2 ? 4 : chord == 5 && k == 1 ? 3 : (int)k * 2);
+        }
         if (n > 127) continue;
         note_on(track, n, vel, 1);
         schedule_off(track, n, gate_chunks);
@@ -392,6 +408,182 @@ ZR_AUDIO_CODE static void record_off(unsigned track, unsigned note)
         st->gate = (uint8_t)((st->gate & 0xf0) | gi);
     }
 }
+
+/* ---- phrase memory: what was just played, on a grid of eighths of a step ---- */
+ZR_AUDIO_CODE static uint32_t now8(void) { return !E.playing ? E.free8 : E.gstep == 0xffffffffu ? 0 : rec_pos8(); }
+ZR_AUDIO_CODE static void phrase_add(unsigned track, unsigned note, unsigned vel)
+{
+    unsigned i = E.ph_w++ % PHRASE;
+    E.ph[i].pos8 = now8(); E.ph[i].dur8 = 0;
+    E.ph[i].note = (uint8_t)(track == ZR_DRUM_TRACK && note >= ZR_DRUMS ? drum_of_note(note) : note);
+    E.ph[i].vel = (uint8_t)vel; E.ph[i].track = (uint8_t)track; E.ph[i].open = 1;
+}
+ZR_AUDIO_CODE static void phrase_close(unsigned track, unsigned note)
+{
+    uint32_t now = now8();
+    for (unsigned i = 0; i < PHRASE; ++i)
+        if (E.ph[i].open && E.ph[i].track == track && E.ph[i].note == note) {
+            uint32_t d = now - E.ph[i].pos8;
+            E.ph[i].dur8 = (uint16_t)(d < 1 ? 1 : d > 60000 ? 60000 : d);
+            E.ph[i].open = 0;
+        }
+}
+ZR_AUDIO_CODE static void phrase_reset(void)
+{
+    for (unsigned i = 0; i < PHRASE; ++i) E.ph[i].vel = 0;
+    for (unsigned i = 0; i < ANSWERS; ++i) E.ans[i].pending = 0;
+    E.duet_state = 0;
+}
+/* CAPTURE: write what was played during the last pattern length into the
+ * pattern, after the fact. Stopped: the first note becomes step 1 and the
+ * pattern is replaced. Playing: notes land where they were played (overdub). */
+ZR_AUDIO_CODE static void capture(unsigned track)
+{
+    zr_pattern *p = &zr_proj.pat[zr_proj.g[ZG_SCENE] & 7][track];
+    unsigned len = p->length && p->length <= ZR_STEPS ? p->length : 16, count = 0;
+    uint32_t now = now8(), origin = 0xffffffffu;
+    for (unsigned i = 0; i < PHRASE; ++i) {
+        if (!E.ph[i].vel || E.ph[i].track != track || now - E.ph[i].pos8 > len * 8U) continue;
+        if (E.ph[i].pos8 < origin) origin = E.ph[i].pos8;
+    }
+    if (origin != 0xffffffffu) {
+        if (E.playing) origin = 0;
+        else for (unsigned i = 0; i < ZR_STEPS; ++i) { p->steps[i].note = p->steps[i].vel = p->steps[i].gate = p->steps[i].fx = 0; }
+        for (unsigned k = 0; k < PHRASE; ++k) {
+            unsigned i = (E.ph_w + k) % PHRASE; /* oldest first: later notes win a shared step */
+            if (!E.ph[i].vel || E.ph[i].track != track || now - E.ph[i].pos8 > len * 8U) continue;
+            zr_step *st = &p->steps[(((E.ph[i].pos8 - origin) + 4) >> 3) % len];
+            ++count;
+            if (track == ZR_DRUM_TRACK) {
+                st->note |= (uint8_t)(1U << (E.ph[i].note & 7));
+                if (E.ph[i].vel > st->vel) st->vel = E.ph[i].vel;
+                continue;
+            }
+            uint32_t dur = E.ph[i].open ? now - E.ph[i].pos8 : E.ph[i].dur8;
+            unsigned gi = 0;
+            while (gi < 15 && zr_gate_eighths[gi] < dur) ++gi;
+            st->note = E.ph[i].note; st->vel = E.ph[i].vel; st->gate = (uint8_t)gi; st->fx = 0;
+        }
+    }
+    zr_status.capture_count = (uint8_t)count;
+    ++zr_status.capture_seq;
+}
+/* DUET: the instrument answers the phrase you just played, one bar later. */
+ZR_AUDIO_CODE static void duet_heard(unsigned track)
+{
+    if (!zr_proj.g[ZG_DUET] || track != zr_live.sel_track % ZR_TRACKS) return;
+    if (E.duet_state == 1 && E.duet_track == track) return;
+    uint32_t n = now8();
+    E.duet_state = 1;
+    E.duet_track = (uint8_t)track;
+    E.call_start = E.playing ? n & ~127u : n;
+}
+ZR_AUDIO_CODE static void duet_tick(void)
+{
+    const uint8_t *g = zr_proj.g;
+    uint32_t now = now8();
+    unsigned active = 0;
+    for (unsigned i = 0; i < ANSWERS; ++i) {
+        if (!E.ans[i].pending) continue;
+        active = 1;
+        if ((int32_t)(now - E.ans[i].at8) < 0) continue;
+        E.ans[i].pending = 0;
+        note_on(E.ans[i].track, E.ans[i].note, E.ans[i].vel, 1);
+        if (E.ans[i].track != ZR_DRUM_TRACK)
+            schedule_off(E.ans[i].track, E.ans[i].note, ((uint32_t)E.ans[i].dur8 * (E.base_len >> 12)) >> 3);
+    }
+    zr_status.duet_active = (uint8_t)active;
+    if (E.duet_state != 1) return;
+    unsigned mode = g[ZG_DUET], var = g[ZG_DUET_VAR] & 127, track = E.duet_track;
+    if (!mode) { E.duet_state = 0; return; }
+    if ((int32_t)(now - (E.call_start + 128)) < 0) return;
+    E.duet_state = 0;
+    uint8_t idx[ANSWERS];
+    unsigned n = 0;
+    for (unsigned k = 0; k < PHRASE && n < ANSWERS; ++k) {
+        unsigned i = (E.ph_w + k) % PHRASE;
+        if (E.ph[i].vel && E.ph[i].track == track && E.ph[i].pos8 - E.call_start < 128) idx[n++] = (uint8_t)i;
+    }
+    if (!n) return;
+    int first = E.ph[idx[0]].note;
+    unsigned root = g[ZG_ROOT] % 12, scale = g[ZG_SCALE];
+    for (unsigned j = 0; j < ANSWERS; ++j) E.ans[j].pending = 0;
+    for (unsigned j = 0; j < n; ++j) {
+        int note = E.ph[idx[j]].note;
+        uint32_t at = E.ph[idx[j]].pos8 + 128, r = zr_rand(&E.rng);
+        if (track != ZR_DRUM_TRACK) {
+            switch (mode) {
+            case ZDUET_ECHO: if (var > 64) note += 12; break;
+            case ZDUET_ANSWER:
+                if (E.ph[idx[j]].pos8 - E.call_start >= 64 || 2 * j >= n) note = (int)zr_scale_shift((unsigned)note, root, scale, var > 80 ? -2 : -1);
+                if (j == n - 1) /* land on the tonic */
+                    for (int d = 0; d < 7; ++d) {
+                        if ((unsigned)(note - d + 120 - (int)root) % 12 == 0) { note -= d; break; }
+                        if ((unsigned)(note + d + 120 - (int)root) % 12 == 0) { note += d; break; }
+                    }
+                break;
+            case ZDUET_MIRROR: {
+                int m = 2 * first - note;
+                note = (int)zr_scale_snap((unsigned)(m < 0 ? 0 : m > 127 ? 127 : m), root, scale);
+                break;
+            }
+            default:
+                if ((r & 127) < var) note = (int)zr_scale_shift((unsigned)note, root, scale, ((r >> 7) & 1 ? 1 : -1) * (1 + (int)((r >> 8) & 1)));
+                if (j && ((r >> 10) & 255) < var / 2) at += (r >> 18) & 1 ? 8 : 4;
+                break;
+            }
+        } else if (mode == ZDUET_WILD && j && (r & 127) < var / 2) at += 4;
+        E.ans[j].at8 = at;
+        E.ans[j].dur8 = E.ph[idx[j]].dur8 ? E.ph[idx[j]].dur8 : 4;
+        E.ans[j].note = (uint8_t)(note < 0 ? 0 : note > 127 ? 127 : note);
+        E.ans[j].vel = (uint8_t)((E.ph[idx[j]].vel * 7U) / 8U + 1U);
+        E.ans[j].track = (uint8_t)track;
+        E.ans[j].pending = 1;
+    }
+}
+/* PURE: adaptive just intonation. Finds the root of everything that sounds
+ * and bends each voice to pure 5-limit intervals (harmonic seventh on dominant
+ * chords), centred so the chord as a whole stays at concert pitch. */
+static const int8_t ji_q8[12] ZR_AUDIO_DATA = {0, 30, 10, 40, -35, -5, -25, 5, 35, -40, 45, -30};
+static const int8_t root_w[12] ZR_AUDIO_DATA = {10, -3, 2, 5, 6, 2, -3, 8, 1, 3, 3, 2};
+ZR_AUDIO_CODE static void pure_tick(void)
+{
+    unsigned amt = zr_proj.g[ZG_PURE] & 127, mask = 0, lowpc = 0;
+    int low = 999;
+    uint8_t pc[ZR_VOICES];
+    for (unsigned i = 0; i < ZR_VOICES; ++i) {
+        const zr_voice *v = &zr_voices[i];
+        pc[i] = 0xff;
+        if (!v->state) continue;
+        int n = (int)v->note + zr_tp[v->track].transpose_q8 / 256;
+        pc[i] = (uint8_t)((unsigned)(n + 120) % 12);
+        mask |= 1U << pc[i];
+        if (n < low) { low = n; lowpc = pc[i]; }
+    }
+    if (mask != E.pure_mask || amt != E.pure_amt) {
+        int best = -9999, sum = 0, cnt = 0;
+        unsigned root = lowpc;
+        E.pure_mask = (uint16_t)mask;
+        E.pure_amt = (uint8_t)amt;
+        for (unsigned r = 0; r < 12; ++r) {
+            if (!(mask & (1U << r))) continue;
+            int score = r == lowpc ? 3 : 0;
+            for (unsigned c = 0; c < 12; ++c) if (mask & (1U << c)) score += root_w[(c + 12 - r) % 12];
+            if (score > best) { best = score; root = r; }
+        }
+        for (unsigned c = 0; c < 12; ++c) {
+            unsigned iv = (c + 12 - root) % 12;
+            int o = iv == 10 && (mask & (1U << ((root + 4) % 12))) ? -80 : ji_q8[iv];
+            E.pure_off[c] = (int16_t)o;
+            if (mask & (1U << c)) { sum += o; ++cnt; }
+        }
+        int mean = cnt ? sum / cnt : 0;
+        for (unsigned c = 0; c < 12; ++c) E.pure_off[c] = (int16_t)(((E.pure_off[c] - mean) * (int)amt) / 127);
+        zr_status.pure_root = (uint8_t)(amt && cnt >= 2 ? root : 0xff);
+    }
+    for (unsigned i = 0; i < ZR_VOICES; ++i) if (pc[i] != 0xff) zr_voices[i].tune_to = E.pure_off[pc[i]];
+}
+
 ZR_AUDIO_CODE static void live_on(unsigned track, unsigned note, unsigned vel, int local)
 {
     const uint8_t *g = zr_proj.g;
@@ -412,6 +604,8 @@ ZR_AUDIO_CODE static void live_on(unsigned track, unsigned note, unsigned vel, i
         h->vel[h->n] = (uint8_t)vel;
         ++h->n;
     }
+    phrase_add(track, note, vel);
+    duet_heard(track);
     if (zr_live.record) record_on(track, note, vel);
     if (arp) return;
     note_on(track, note, vel, local);
@@ -424,6 +618,7 @@ ZR_AUDIO_CODE static void live_off(unsigned track, unsigned note, int local)
     int arp = g[ZG_TRACK(track, ZT_ARP_ON)] != 0;
     if (h->phys) --h->phys;
     record_off(track, note);
+    phrase_close(track, note);
     if (arp && g[ZG_TRACK(track, ZT_ARP_HOLD)]) {
         if (!h->phys) h->latched = 1;
         return;
@@ -472,11 +667,12 @@ ZR_AUDIO_CODE static void drain(unsigned qi)
                 E.gstep = 0xffffffffu;
                 E.t_q8 = E.cur_len = 0;
                 E.clk_q8 = 0;
+                phrase_reset();
                 out_midi(0xfa, 0, 0);
             }
             break;
         case ZE_STOP:
-            if (E.playing) out_midi(0xfc, 0, 0);
+            if (E.playing) { out_midi(0xfc, 0, 0); phrase_reset(); }
             E.playing = 0;
             for (unsigned t = 0; t < ZR_TRACKS; ++t) {
                 for (unsigned i = 0; i < OFFS; ++i)
@@ -495,6 +691,7 @@ ZR_AUDIO_CODE static void drain(unsigned qi)
                     if (zr_voices[i].state == 1 && zr_voices[i].track == track && zr_voices[i].sustained)
                         voice_release(&zr_voices[i]);
             break;
+        case ZE_CAPTURE: capture(track); break;
         case ZE_PANIC:
             for (unsigned t = 0; t < ZR_TRACKS; ++t) all_off(t);
             for (unsigned i = 0; i < ZR_VOICES; ++i) zr_voices[i].state = 0;
@@ -550,6 +747,10 @@ ZR_AUDIO_CODE void zr_audio(int32_t *out, unsigned frames)
         drain(ZQ_MIDI);
         seq_tick();
         arp_tick();
+        E.free_q8 += ZR_CHUNK << 8;
+        for (uint32_t e8 = E.base_len >> 3 > 256 ? E.base_len >> 3 : 256; E.free_q8 >= e8; ++E.free8) E.free_q8 -= e8;
+        duet_tick();
+        pure_tick();
         int32_t *dl = bus_dly + c * ZR_CHUNK, *rv = bus_rev + c * ZR_CHUNK;
         for (unsigned t = 0; t < ZR_TRACKS; ++t) {
             int32_t tb[2 * ZR_CHUNK], td[ZR_CHUNK], tr[ZR_CHUNK];

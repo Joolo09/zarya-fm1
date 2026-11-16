@@ -69,13 +69,15 @@ enum {
     ZG_GEN_BASE,
     ZG_GEN_SEED_L = ZG_GEN_BASE, ZG_GEN_SEED_H, ZG_GEN_DENSITY, ZG_GEN_COMPLEX, ZG_GEN_RANGE, ZG_GEN_LENGTH,
     ZG_GEN_VARIATION, ZG_GEN_STYLE,
-    ZG_COUNT, /* 60 */
+    ZG_PURE, ZG_DUET, ZG_DUET_VAR, /* live intelligence */
+    ZG_COUNT, /* 63 */
     ZR_GLOBALS = 64
 };
 enum { ZT_VOLUME, ZT_MUTE, ZT_ARP_ON, ZT_ARP_MODE, ZT_ARP_RATE, ZT_ARP_OCT, ZT_ARP_GATE, ZT_ARP_HOLD, ZT_COUNT };
 #define ZG_TRACK(track, field) (ZG_TRACK_BASE + (track) * ZT_COUNT + (field))
 enum { ZARP_UP, ZARP_DOWN, ZARP_UPDOWN, ZARP_RANDOM, ZARP_ORDER };
 enum { ZGEN_MELODY, ZGEN_BASS, ZGEN_ARP, ZGEN_CHORDS };
+enum { ZDUET_OFF, ZDUET_ECHO, ZDUET_ANSWER, ZDUET_MIRROR, ZDUET_WILD };
 enum { ZR_SCALE_COUNT = 12, ZR_CHORD_COUNT = 8 };
 
 /* ---- parameter descriptors: the single source of truth for names/ranges ---- */
@@ -129,7 +131,7 @@ typedef struct {
 extern zr_project zr_proj;
 
 /* ---- engine: control -> audio ---- */
-enum { ZE_NOTE_ON, ZE_NOTE_OFF, ZE_ALL_OFF, ZE_PLAY, ZE_STOP, ZE_BEND, ZE_SUSTAIN, ZE_PANIC, ZE_CC };
+enum { ZE_NOTE_ON, ZE_NOTE_OFF, ZE_ALL_OFF, ZE_PLAY, ZE_STOP, ZE_BEND, ZE_SUSTAIN, ZE_PANIC, ZE_CC, ZE_CAPTURE };
 enum { ZQ_CONTROL, ZQ_MIDI }; /* one producer context each */
 /* Returns 0, or -1 when the queue is full (the event is dropped). */
 int zr_post(unsigned queue, unsigned type, unsigned track, unsigned a, unsigned b);
@@ -146,6 +148,10 @@ typedef struct {
     volatile uint8_t peak_master;
     volatile uint8_t track_voices[ZR_TRACKS];
     volatile uint32_t overloads, dropped, blocks;
+    volatile uint8_t pure_root;      /* 0..11 root the tuner hears, 0xff none */
+    volatile uint8_t capture_seq;    /* increments after each CAPTURE */
+    volatile uint8_t capture_count;  /* notes written by the last CAPTURE */
+    volatile uint8_t duet_active;    /* the machine is answering */
 } zr_status_t;
 extern zr_status_t zr_status;
 
@@ -154,6 +160,7 @@ typedef struct {
     volatile uint8_t sel_track;  /* target of MIDI channel 16 and local keys */
     volatile uint8_t scene_req;  /* 0xff none */
     volatile uint8_t rec_cursor; /* step record cursor when stopped */
+    volatile uint8_t degree;     /* live chord: 0 = I .. 6 = VII, moves every sequenced synth note in key */
 } zr_live_t;
 extern zr_live_t zr_live;
 
@@ -180,6 +187,8 @@ void zr_fx_set_tempo(uint32_t step_len_q8);
 /* ---- sequencer helpers / generator (zr_seq.c) ---- */
 uint32_t zr_rand(uint32_t *state);
 unsigned zr_scale_snap(unsigned note, unsigned root, unsigned scale);
+/* Move a note by k scale degrees (snaps into the scale first). */
+unsigned zr_scale_shift(unsigned note, unsigned root, unsigned scale, int k);
 void zr_pattern_clear(zr_pattern *p, unsigned length);
 typedef struct {
     uint16_t seed;
@@ -192,6 +201,9 @@ void zr_generate(zr_pattern *out, const zr_gen_params *gp, int drums);
 unsigned zr_factory_count(int kits);
 void zr_factory_patch(zr_patch *out, unsigned index, int kits);
 void zr_patch_init(zr_patch *p, int kit);
+/* Sound breeding: a child of a (and optionally of mate), mutated by amount 0..127.
+ * Deterministic for a given seed; the result is always a valid, audible patch. */
+void zr_patch_breed(zr_patch *out, const zr_patch *a, const zr_patch *mate, unsigned amount, uint32_t seed);
 void zr_project_init(zr_project *p);
 void zr_project_demo(zr_project *p);
 int zr_patch_valid(const zr_patch *p);

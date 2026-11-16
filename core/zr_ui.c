@@ -21,7 +21,9 @@ static const uint16_t track_color[ZR_TRACKS] = {C_LIME, C_CYAN, C_CORAL, C_AMBER
 
 enum { P_HOME, P_SOUND, P_ENV, P_LFO, P_FX, P_SCALE, P_MIX, P_ARP, P_SEQ, P_SAVE, PAGES };
 enum { B_NONE, B_PATCH, B_OP, B_GLOBAL, B_TRACK, B_DRUM, B_KIT, B_STEP_NOTE, B_STEP_VEL, B_STEP_GATE, B_STEP_PROB,
-       B_STEP_RATCH, B_STEP_CHORD, B_PAT_LEN, B_SEED, B_SLOT, B_MIXVOL, B_MIXDLY, B_MIXREV, B_MIXMUTE, B_CONFIRM };
+       B_STEP_RATCH, B_STEP_CHORD, B_PAT_LEN, B_SEED, B_SLOT, B_MIXVOL, B_MIXDLY, B_MIXREV, B_MIXMUTE, B_CONFIRM,
+       B_DEGREE, B_EVO_AMT, B_EVO_MATE, B_EVO_PICK };
+enum { SUB_EVOLVE = 7 };
 typedef struct { uint8_t kind, id; } bind_t;
 typedef struct { const char *title; bind_t k[4]; } sub_t;
 #define NB {B_NONE, 0}
@@ -39,7 +41,8 @@ static const sub_t s_sound[] = {
     {"FILTER", {{B_PATCH, ZP_FLT_TYPE}, {B_PATCH, ZP_CUTOFF}, {B_PATCH, ZP_RESO}, {B_PATCH, ZP_FLT_ENV}}},
     {"FILTER MOD", {{B_PATCH, ZP_FLT_KEY}, {B_PATCH, ZP_FLT_VEL}, NB, NB}},
     {"PITCH", {{B_PATCH, ZP_TRANSPOSE}, {B_PATCH, ZP_GLIDE}, {B_PATCH, ZP_MODE}, {B_PATCH, ZP_BEND}}},
-    {"SENDS", {{B_PATCH, ZP_DLY_SEND}, {B_PATCH, ZP_REV_SEND}, {B_PATCH, ZP_SPREAD}, NB}}};
+    {"SENDS", {{B_PATCH, ZP_DLY_SEND}, {B_PATCH, ZP_REV_SEND}, {B_PATCH, ZP_SPREAD}, NB}},
+    {"EVOLVE", {{B_EVO_AMT, 0}, {B_EVO_MATE, 0}, {B_EVO_PICK, 0}, NB}}};
 static const sub_t s_sound_kit[] = {
     {"DRUM", {{B_DRUM, ZD_TUNE}, {B_DRUM, ZD_DECAY}, {B_DRUM, ZD_TONE}, {B_DRUM, ZD_LEVEL}}},
     {"KIT", {{B_KIT, ZK_LEVEL}, {B_KIT, ZK_DLY_SEND}, {B_KIT, ZK_REV_SEND}, {B_KIT, ZK_PAN_WIDTH}}}};
@@ -59,7 +62,8 @@ static const sub_t s_fx[] = {
 static const sub_t s_scale[] = {
     {"SCALE", {{B_GLOBAL, ZG_ROOT}, {B_GLOBAL, ZG_SCALE}, {B_GLOBAL, ZG_SCALE_LOCK}, {B_GLOBAL, ZG_KB_OCT}}},
     {"GENERATE", {{B_SEED, 0}, {B_GLOBAL, ZG_GEN_DENSITY}, {B_GLOBAL, ZG_GEN_COMPLEX}, {B_GLOBAL, ZG_GEN_STYLE}}},
-    {"GENERATE 2", {{B_GLOBAL, ZG_GEN_LENGTH}, {B_GLOBAL, ZG_GEN_RANGE}, {B_GLOBAL, ZG_GEN_VARIATION}, NB}}};
+    {"GENERATE 2", {{B_GLOBAL, ZG_GEN_LENGTH}, {B_GLOBAL, ZG_GEN_RANGE}, {B_GLOBAL, ZG_GEN_VARIATION}, NB}},
+    {"LIVE", {{B_GLOBAL, ZG_PURE}, {B_GLOBAL, ZG_DUET}, {B_GLOBAL, ZG_DUET_VAR}, {B_DEGREE, 0}}}};
 static const sub_t s_mix[] = {
     {"VOLUME", {{B_MIXVOL, 0}, {B_MIXVOL, 1}, {B_MIXVOL, 2}, {B_MIXVOL, 3}}},
     {"DELAY SEND", {{B_MIXDLY, 0}, {B_MIXDLY, 1}, {B_MIXDLY, 2}, {B_MIXDLY, 3}}},
@@ -88,7 +92,10 @@ static struct {
     uint32_t prev_buttons, prev_keys, now, notice_until, last_anim;
     char notice[32];
     zr_pattern undo;
+    uint8_t evo_active, evo_track, evo_amt, evo_mate, evo_pick, evo_gen, cap_seq;
+    zr_patch evo_orig, evo_parent, evo_cand[5];
 } U;
+static const char *const roman[7] = {"I", "II", "III", "IV", "V", "VI", "VII"};
 
 unsigned zr_ui_page(void) { return U.page; }
 void zr_ui_touch(void) { U.dirty = 1; }
@@ -141,6 +148,29 @@ void zr_load_patch(unsigned track, const zr_patch *p)
     zr_patch_touch(track);
     U.dirty = 1;
     zr_sysex_notify_patch(track);
+}
+
+/* ---- EVOLVE: breed sounds. PICK auditions the parent or one of four children;
+ * SAVE makes the picked one the parent of the next generation; REC restores
+ * the sound you started from. ---- */
+static void evo_refresh(void)
+{
+    zr_patch mate;
+    const zr_patch *m = 0;
+    if (U.evo_mate) { zr_factory_patch(&mate, U.evo_mate - 1U, 0); m = &mate; }
+    U.evo_cand[0] = U.evo_parent;
+    for (unsigned k = 1; k < 5; ++k) zr_patch_breed(&U.evo_cand[k], &U.evo_parent, m, U.evo_amt, U.evo_gen * 16U + k);
+}
+static int evo_begin(void)
+{
+    unsigned t = zr_live.sel_track % ZR_TRACKS;
+    if (t == ZR_DRUM_TRACK) return 0;
+    if (U.evo_active && U.evo_track == t) return 1;
+    U.evo_orig = U.evo_parent = zr_proj.patch[t];
+    U.evo_active = 1; U.evo_track = (uint8_t)t; U.evo_gen = 1; U.evo_pick = 0;
+    if (!U.evo_amt) U.evo_amt = 48;
+    evo_refresh();
+    return 1;
 }
 
 /* ---- pages ---- */
@@ -232,6 +262,20 @@ static int bind_info(bind_t b, unsigned knob, const char **name, char text[12], 
     case B_SEED: *name = "SEED"; *value = zr_proj.g[ZG_GEN_SEED_H] * 128U + zr_proj.g[ZG_GEN_SEED_L]; *max = 16383; zr_utoa(*value, text); return 1;
     case B_SLOT: *name = "SLOT"; if (U.slot >= b.id) U.slot = 0; *value = U.slot; *max = b.id - 1U; zr_utoa(U.slot + 1U, text); return 1;
     case B_CONFIRM: *name = "FORMAT"; *value = U.confirm; *max = 1; scpy(text, U.confirm ? "YES" : "NO"); return 1;
+    case B_DEGREE: *name = "CHORD"; *value = zr_live.degree % 7; *max = 6; scpy(text, roman[*value]); return 1;
+    case B_EVO_AMT: if (is_kit(t)) return 0; *name = "MUTATE"; *value = U.evo_amt ? U.evo_amt : 48; *max = 127; zr_utoa(*value, text); return 1;
+    case B_EVO_MATE: {
+        if (is_kit(t)) return 0;
+        *name = "MATE"; *value = U.evo_mate; *max = zr_factory_count(0);
+        if (!U.evo_mate) scpy(text, "NONE");
+        else { zr_patch m; zr_factory_patch(&m, U.evo_mate - 1U, 0); zr_copy(text, m.name, 9); text[9] = 0; }
+        return 1;
+    }
+    case B_EVO_PICK:
+        if (is_kit(t)) return 0;
+        *name = "PICK"; *value = U.evo_active && U.evo_track == t ? U.evo_pick : 0; *max = 4;
+        if (*value) { scpy(text, "CHILD "); text[6] = (char)('0' + *value); text[7] = 0; } else scpy(text, "PARENT");
+        return 1;
     default: return 0;
     }
     if (!d) return 0;
@@ -283,6 +327,17 @@ static void bind_edit(bind_t b, unsigned knob, int delta)
     }
     case B_SLOT: { int v = (int)U.slot + delta; U.slot = (uint8_t)(v < 0 ? 0 : v >= (int)b.id ? (int)b.id - 1 : v); U.armed = 0; break; }
     case B_CONFIRM: U.confirm = (uint8_t)(delta > 0); U.armed = 0; break;
+    case B_DEGREE: { int v = (int)(zr_live.degree % 7) + delta; zr_live.degree = (uint8_t)(v < 0 ? 0 : v > 6 ? 6 : v); break; }
+    case B_EVO_AMT: case B_EVO_MATE: case B_EVO_PICK: {
+        if (!evo_begin()) break;
+        int max = b.kind == B_EVO_AMT ? 127 : b.kind == B_EVO_MATE ? (int)zr_factory_count(0) : 4;
+        uint8_t *f = b.kind == B_EVO_AMT ? &U.evo_amt : b.kind == B_EVO_MATE ? &U.evo_mate : &U.evo_pick;
+        int v = (int)*f + delta;
+        *f = (uint8_t)(v < (b.kind == B_EVO_AMT ? 1 : 0) ? (b.kind == B_EVO_AMT ? 1 : 0) : v > max ? max : v);
+        if (b.kind != B_EVO_PICK) evo_refresh();
+        zr_load_patch(t, &U.evo_cand[U.evo_pick]);
+        break;
+    }
     default: break;
     }
     U.dirty = 1;
@@ -383,6 +438,25 @@ void zr_ui_control(const zr_controls *c, uint32_t now_ms)
     for (unsigned b = 0; b < ZR_BUTTONS; ++b) {
         if (!(down & (1U << b))) continue;
         if (b == ZR_BTN_PLAY) { zr_post(ZQ_CONTROL, zr_status.playing ? ZE_STOP : ZE_PLAY, 0xff, 0, 0); continue; }
+        if (b == ZR_BTN_REC && glo) { /* CAPTURE what was just played */
+            U.undo = *cur_pattern();
+            U.undo_valid = 1; U.undo_track = (uint8_t)sel(); U.undo_scene = zr_proj.g[ZG_SCENE] & 7;
+            zr_post(ZQ_CONTROL, ZE_CAPTURE, sel(), 0, 0);
+            continue;
+        }
+        if (b == ZR_BTN_REC && U.page == P_SOUND && U.sub[P_SOUND] == SUB_EVOLVE && U.evo_active && U.evo_track == sel()) {
+            zr_load_patch(sel(), &U.evo_orig);
+            U.evo_active = 0; U.evo_pick = 0;
+            zr_ui_notice("ORIGINAL RESTORED");
+            continue;
+        }
+        if (b == ZR_BTN_SAVE && U.page == P_SOUND && U.sub[P_SOUND] == SUB_EVOLVE && evo_begin()) {
+            U.evo_parent = zr_proj.patch[sel()];
+            ++U.evo_gen; U.evo_pick = 0;
+            evo_refresh();
+            zr_ui_notice("NEXT GENERATION");
+            continue;
+        }
         if (b == ZR_BTN_REC) {
             if (U.page == P_SCALE && U.undo_valid) {
                 zr_copy(&zr_proj.pat[U.undo_scene][U.undo_track], &U.undo, sizeof U.undo);
@@ -446,6 +520,7 @@ void zr_ui_control(const zr_controls *c, uint32_t now_ms)
         if (kdown & bit) {
             unsigned w = 0xff;
             for (unsigned i = 0; i < 16; ++i) if (white_keys[i] == k) w = i;
+            if (((c->buttons >> ZR_BTN_SCL) & 1) && w < 7) { zr_live.degree = (uint8_t)w; zr_ui_notice(roman[w]); continue; }
             if (glo && w < 4) { zr_set_global(ZG_TRACK(w, ZT_MUTE), !zr_proj.g[ZG_TRACK(w, ZT_MUTE)], 1); continue; }
             if (glo && w >= 4 && w < 12) { zr_set_global(ZG_SCENE, (int)w - 4, 1); if (!zr_status.playing) zr_proj.g[ZG_SCENE] = (uint8_t)(w - 4); continue; }
             if (U.page == P_SEQ && w != 0xff) { toggle_step((U.cursor / 16) * 16 + w); U.dirty = 1; continue; }
@@ -461,6 +536,10 @@ void zr_ui_control(const zr_controls *c, uint32_t now_ms)
     }
     U.prev_buttons = c->buttons;
     U.prev_keys = c->keys;
+    if (zr_status.capture_seq != U.cap_seq) {
+        U.cap_seq = zr_status.capture_seq;
+        zr_ui_notice(zr_status.capture_count ? "CAPTURED - SCL PAGE REC: UNDO" : "NOTHING TO CAPTURE");
+    }
     if (U.notice[0] && (int32_t)(now_ms - U.notice_until) >= 0) { U.notice[0] = 0; U.dirty = 1; }
     if (now_ms - U.last_anim >= 50U) { /* meters, playhead */
         U.last_anim = now_ms;
@@ -511,6 +590,12 @@ static void header(void)
     for (unsigned i = 0; i < n && n > 1; ++i) zr_fill(x + 6 + (int)i * 5, 8, 3, 3, i == U.sub[U.page] ? C_TEXT : C_LINE);
     zr_utoa(zr_proj.g[ZG_TEMPO] + 40U, t);
     zr_text_right(214, 5, t, 1, C_DIM);
+    { /* live state: chord degree, PURE root, DUET answering */
+        int xr = 190;
+        if (zr_status.duet_active && xr - 24 > x + 44) { zr_text_right(xr, 5, "DUET", 1, C_CORAL); xr -= 30; }
+        if (zr_status.pure_root < 12 && xr - 12 > x + 44) { zr_text_right(xr, 5, zr_note_names[zr_status.pure_root], 1, C_CYAN); xr -= 18; }
+        if (zr_live.degree % 7 && xr - 18 > x + 44) zr_text_right(xr, 5, roman[zr_live.degree % 7], 1, C_AMBER);
+    }
     if (zr_live.record) zr_fill(220, 6, 6, 6, C_RED);
     if (zr_status.playing) { zr_fill(230, 5, 2, 8, C_LIME); zr_fill(232, 7, 2, 4, C_LIME); zr_fill(234, 8, 2, 2, C_LIME); }
     else zr_fill(230, 6, 6, 6, C_LINE);
@@ -583,6 +668,30 @@ static void draw_algo(void)
     zr_text(22, 122, "OUT", 1, C_DIM);
     zr_text(22, 140, "EDIT AGAIN: NEXT OPERATOR", 1, C_LINE);
 }
+static void draw_evolve(void)
+{
+    static const uint8_t genes[12] = {ZP_OP(0, ZO_LEVEL), ZP_OP(1, ZO_LEVEL), ZP_OP(2, ZO_LEVEL), ZP_OP(3, ZO_LEVEL),
+        ZP_OP(1, ZO_RATIO), ZP_OP(2, ZO_RATIO), ZP_OP(3, ZO_RATIO), ZP_ALGO, ZP_FEEDBACK, ZP_CUTOFF, ZP_RESO, ZP_LFO_DEPTH};
+    int live = U.evo_active && U.evo_track == sel();
+    uint16_t tc = track_color[sel()];
+    for (unsigned k = 0; k < 5; ++k) {
+        int x = 6 + (int)k * 46, cur = live && U.evo_pick == k;
+        const uint8_t *p = live ? U.evo_cand[k].p : zr_proj.patch[sel()].p;
+        zr_fill(x, 26, 43, 92, cur ? C_PANEL2 : C_PANEL);
+        if (cur) zr_frame(x, 26, 43, 92, C_TEXT);
+        char n[2] = {(char)(k ? '0' + k : 'P'), 0};
+        zr_text(x + 17, 30, n, 2, !live && k ? C_LINE : cur ? C_TEXT : C_DIM);
+        if (!live && k) continue;
+        for (unsigned g = 0; g < 12; ++g) { /* the sound's fingerprint */
+            const zr_pdesc *d = zr_patch_desc(genes[g]);
+            int hgt = 2 + ((p[genes[g]] - d->min) * 60) / (d->max > d->min ? d->max - d->min : 1);
+            zr_fill(x + 3 + (int)g * 3, 114 - hgt, 2, hgt, k && live && p[genes[g]] != U.evo_cand[0].p[genes[g]] ? C_AMBER : tc);
+        }
+    }
+    if (live) { char g[16] = "GENERATION "; zr_utoa(U.evo_gen, g + 11); zr_text(6, 124, g, 1, C_DIM); }
+    zr_text(6, 138, "PICK: LISTEN   SAVE: BREED", 1, C_TEXT);
+    zr_text(6, 152, live ? "REC: BACK TO THE ORIGINAL" : "TURN PICK TO GROW 4 CHILDREN", 1, C_LINE);
+}
 static void draw_env(void)
 {
     const uint8_t *p = zr_proj.patch[sel()].p;
@@ -654,7 +763,7 @@ static void draw_roll(void)
         else zr_fill(x, 130 - (int)((s->note - lo) * 104) / (int)span, (int)w + ((zr_gate_eighths[s->gate & 15] > 8) ? (int)w : 0), 4, tc);
     }
     if (zr_status.playing) zr_fill(8 + (int)(zr_status.step[t] * 224) / (p->length ? p->length : 16), 24, 1, 112, C_TEXT);
-    zr_text(8, 142, "SAVE: GENERATE", 1, C_TEXT);
+    zr_text(8, 142, U.sub[P_SCALE] == 3 ? "HOLD SCL + KEY: CHORD" : "SAVE: GENERATE", 1, C_TEXT);
     zr_text(140, 142, U.undo_valid ? "REC: UNDO" : "", 1, C_AMBER);
     char txt[12];
     zr_text(8, 156, zr_note_names[zr_proj.g[ZG_ROOT] % 12], 1, C_DIM);
@@ -698,7 +807,7 @@ static void draw_list(void)
         zr_text(8, 146, st[zr_store_state() & 3], 1, zr_store_state() == ZS_READY ? C_LIME : C_AMBER);
         zr_utoa(zr_status.load, t + 4);
         zr_text(8, 158, t, 1, C_DIM);
-        zr_text(80, 158, "ZARYA 0.1.0", 1, C_DIM);
+        zr_text(80, 158, "ZARYA 0.2.0", 1, C_DIM);
     }
 }
 
@@ -709,7 +818,11 @@ void zr_ui_draw(uint16_t *buf, unsigned y0, unsigned h)
     header();
     switch (U.page) {
     case P_HOME: draw_home(); break;
-    case P_SOUND: if (!is_kit(sel()) && U.sub[P_SOUND] < 3) draw_algo(); else draw_list(); break;
+    case P_SOUND:
+        if (!is_kit(sel()) && U.sub[P_SOUND] < 3) draw_algo();
+        else if (!is_kit(sel()) && U.sub[P_SOUND] == SUB_EVOLVE) draw_evolve();
+        else draw_list();
+        break;
     case P_ENV: if (is_kit(sel())) draw_list(); else draw_env(); break;
     case P_SEQ: draw_seq(); break;
     case P_SCALE: draw_roll(); break;

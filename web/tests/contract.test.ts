@@ -127,6 +127,25 @@ describe('editor <-> firmware simulator', () => {
     expect(sim.frame(true)!.length).toBe(57600);
     expect(sim.flash().every((b) => b === 0xff)).toBe(true);
   });
+  it('live: chord degree, PURE root detection and CAPTURE work through the protocol', async () => {
+    const { client, sim } = await connect();
+    expect(client.has(CAP.LIVE)).toBe(true);
+    client.conduct(3);
+    expect((await client.status()).degree).toBe(3);
+    client.setParam(1, 0, globalId('PURE'), 127); client.flush();
+    client.select(1);
+    for (const n of [60, 64, 67]) client.note(1, n, 100);
+    for (let b = 0; b < 40; b++) sim.audio();
+    expect((await client.status()).pureRoot).toBe(0);
+    for (const n of [60, 64, 67]) client.note(1, n, 0);
+    for (let b = 0; b < 400; b++) sim.audio();
+    client.capture(1);
+    for (let b = 0; b < 4; b++) sim.audio();
+    const st = await client.status();
+    expect(st.captureCount).toBe(3);
+    const pat = decodePattern(blobUnpack(await client.getBlob(BLOB.PATTERN, 0, 1), BLOB.PATTERN));
+    expect(pat.steps[0].note).toBe(67); // three notes on one step: the last one played wins
+  });
   it('times out cleanly when the device is silent and fails pending work on disconnect', async () => {
     const dead = { kind: 'midi' as const, label: 'x', send() {}, onFrame: null, onClose: null as null | (() => void), close() { this.onClose?.(); } };
     const c = new Client(dead, 60);

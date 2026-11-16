@@ -56,6 +56,7 @@ static const char *const n_arp_rate[] = {"1/8", "1/16", "1/32", "1/8T", "1/16T"}
 static const char *const n_dly_time[] = {"1/32", "1/16", "1/8T", "1/16D", "1/8", "1/4T", "1/8D", "1/4"};
 static const char *const n_gen_len[] = {"16", "32", "48", "64"};
 static const char *const n_gen_style[] = {"MELODY", "BASS", "ARP", "CHORDS"};
+static const char *const n_duet[] = {"OFF", "ECHO", "ANSWER", "MIRROR", "WILD"};
 
 #define P(name, min, max, def, fmt) {name, min, max, def, fmt, 0}
 #define E(name, names, def) {name, 0, (uint8_t)(sizeof(names) / sizeof(names[0]) - 1), def, ZF_ENUM, names}
@@ -111,6 +112,7 @@ static const zr_pdesc fx_desc[ZG_COUNT - ZG_FX_BASE] = {
     P("SEED LO", 0, 127, 42, ZF_INT), P("SEED HI", 0, 127, 0, ZF_INT), P("DENSITY", 0, 127, 80, ZF_INT),
     P("COMPLEX", 0, 127, 50, ZF_INT), P("RANGE", 0, 2, 1, ZF_INT1), E("LENGTH", n_gen_len, 0),
     P("VARIATN", 0, 127, 40, ZF_INT), E("STYLE", n_gen_style, 0),
+    P("PURE", 0, 127, 0, ZF_INT), E("DUET", n_duet, 0), P("DUET VAR", 0, 127, 50, ZF_INT),
 };
 
 const zr_pdesc *zr_patch_desc(unsigned id)

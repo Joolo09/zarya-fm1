@@ -3,9 +3,9 @@
 // exist here; there is no firmware-update or persistent-write command.
 import { schema } from './schema';
 
-export const CMD = { HELLO: 1, GET_BLOB: 2, PUT_BLOB: 3, SET_PARAM: 4, TRANSPORT: 5, NOTE: 6, GET_STATUS: 7, GENERATE: 8, SELECT: 9 } as const;
+export const CMD = { HELLO: 1, GET_BLOB: 2, PUT_BLOB: 3, SET_PARAM: 4, TRANSPORT: 5, NOTE: 6, GET_STATUS: 7, GENERATE: 8, SELECT: 9, LIVE: 10 } as const;
 export const RSP = { HELLO: 0x41, BLOB: 0x42, PUT_ACK: 0x43, STATUS: 0x47, GENERATED: 0x48, EVT_PARAM: 0x4a, EVT_PATCH: 0x4b, ERROR: 0x4f } as const;
-export const CAP = { PARAM: 1, BLOB_GET: 2, BLOB_PUT: 4, TRANSPORT: 8, GENERATE: 16, PERSIST: 32, FLASH: 64 } as const;
+export const CAP = { PARAM: 1, BLOB_GET: 2, BLOB_PUT: 4, TRANSPORT: 8, GENERATE: 16, PERSIST: 32, FLASH: 64, LIVE: 128 } as const;
 export const FRAME_MAX = 128;
 export const CHUNK = 96;
 
@@ -57,7 +57,7 @@ export interface Identity {
   protocol: number; firmware: string; schema: number; tracks: number; voices: number; steps: number; scenes: number;
   caps: number; storage: number; hardware: boolean;
 }
-export interface Status { playing: boolean; scene: number; step: number[]; voices: number; load: number; track: number; page: number; storage: number; recording: boolean; peak: number }
+export interface Status { playing: boolean; scene: number; step: number[]; voices: number; load: number; track: number; page: number; storage: number; recording: boolean; peak: number; degree: number; pureRoot: number; duet: boolean; captureSeq: number; captureCount: number }
 export type DeviceEvent =
   | { type: 'param'; scope: number; track: number; id: number; value: number }
   | { type: 'patch'; track: number }
@@ -193,10 +193,14 @@ export class Client {
   transportCmd(play: boolean) { if (this.has(CAP.TRANSPORT)) this.tx(CMD.TRANSPORT, [play ? 1 : 0]); }
   note(track: number, note: number, vel: number) { this.tx(CMD.NOTE, [track, note & 127, vel & 127]); }
   select(track: number, scene = schema.scenes) { this.tx(CMD.SELECT, [track, scene]); }
+  /** Live chord: 0 = I .. 6 = VII. Moves every sequenced synth note in key. */
+  conduct(degree: number) { if (this.has(CAP.LIVE)) this.tx(CMD.LIVE, [0, Math.min(6, Math.max(0, degree))]); }
+  /** Write the phrase just played on a track into its pattern (volatile). */
+  capture(track: number) { if (this.has(CAP.LIVE)) this.tx(CMD.LIVE, [1, track]); }
   async generate(track: number): Promise<void> { await this.request(CMD.GENERATE, [track], RSP.GENERATED); }
   async status(): Promise<Status> {
     const d = (await this.request(CMD.GET_STATUS, [], RSP.STATUS)).payload;
-    return { playing: !!d[0], scene: d[1], step: [d[2], d[3], d[4], d[5]], voices: d[6], load: d[7], track: d[8], page: d[9], storage: d[10], recording: !!d[11], peak: d[12] };
+    return { playing: !!d[0], scene: d[1], step: [d[2], d[3], d[4], d[5]], voices: d[6], load: d[7], track: d[8], page: d[9], storage: d[10], recording: !!d[11], peak: d[12], degree: d[13] ?? 0, pureRoot: d[14] ?? 255, duet: !!d[15], captureSeq: d[16] ?? 0, captureCount: d[17] ?? 0 };
   }
   close() { this.fail(new Error('closed')); this.transport.onFrame = null; this.transport.close(); }
 }

@@ -186,6 +186,57 @@ void zr_factory_patch(zr_patch *out, unsigned index, int kit)
     zr_patch_sanitize(out);
 }
 
+/* ---- sound breeding ---- */
+void zr_patch_breed(zr_patch *out, const zr_patch *a, const zr_patch *mate, unsigned amount, uint32_t seed)
+{
+    static const uint8_t groups[7][2] = {{ZP_ALGO, 2}, {ZP_FLT_TYPE, 10}, {ZP_LFO_RATE, 6}, {ZP_OP_BASE, ZO_COUNT},
+        {ZP_OP_BASE + ZO_COUNT, ZO_COUNT}, {ZP_OP_BASE + 2 * ZO_COUNT, ZO_COUNT}, {ZP_OP_BASE + 3 * ZO_COUNT, ZO_COUNT}};
+    static const uint8_t carriers[8] = {1, 1, 1, 1, 5, 7, 7, 15};
+    static const char hex[] = "0123456789ABCDEF";
+    uint32_t rng = seed * 2654435761u + 0x9e3779b9u;
+    (void)zr_rand(&rng);
+    *out = *a;
+    if (a->type != ZR_PATCH_SYNTH) return;
+    if (amount > 127) amount = 127;
+    if (mate && mate->type == ZR_PATCH_SYNTH) /* crossover: whole gene groups come from one parent */
+        for (unsigned g = 0; g < 7; ++g)
+            if (zr_rand(&rng) & 1) zr_copy(out->p + groups[g][0], mate->p + groups[g][0], groups[g][1]);
+    for (unsigned i = 0; i < ZR_PATCH_PARAMS; ++i) {
+        const zr_pdesc *d = zr_patch_desc(i);
+        uint32_t r = zr_rand(&rng);
+        if (i == ZP_LEVEL || i == ZP_TRANSPOSE || i == ZP_MODE || i == ZP_BEND || i == ZP_PAN || i == ZP_GLIDE ||
+            i == ZP_RSV || (i >= ZP_M1_VAL && i <= ZP_M4_VAL)) continue;
+        if ((r & 255) >= amount) continue;
+        int field = i >= ZP_OP_BASE ? (int)((i - ZP_OP_BASE) % ZO_COUNT) : -1, v = out->p[i];
+        if (d->fmt == ZF_ENUM || d->fmt == ZF_ONOFF || i == ZP_ALGO || field == ZO_RATIO || field == ZO_WAVE) {
+            if (((r >> 8) & 3) == 0) v = (int)(d->min + (r >> 10) % (unsigned)(d->max - d->min + 1)); /* rare jump */
+        } else {
+            int span = ((d->max - d->min) * (int)amount) / 381 + 1;
+            v += (int)((r >> 8) % (unsigned)(2 * span + 1)) - span;
+        }
+        out->p[i] = (uint8_t)zr_clamp_param(d, v);
+    }
+    /* keep every child playable: carriers audible, no click-only or sub-audio results */
+    unsigned car = carriers[out->p[ZP_ALGO] & 7];
+    for (unsigned op = 0; op < 4; ++op) {
+        uint8_t *o = out->p + ZP_OP_BASE + op * ZO_COUNT;
+        if (!((car >> op) & 1)) continue;
+        if (o[ZO_LEVEL] < 104) o[ZO_LEVEL] = (uint8_t)(104 + zr_rand(&rng) % 24);
+        if (o[ZO_DEC] < 34 && o[ZO_SUS] < 40) o[ZO_DEC] = 46;
+        if (o[ZO_ATK] > 100) o[ZO_ATK] = 100;
+        if (o[ZO_WAVE] == ZW_NOISE && op == 0) o[ZO_WAVE] = ZW_SINE;
+        if (o[ZO_RATIO] > 8) o[ZO_RATIO] = 1;
+    }
+    if (out->p[ZP_FLT_TYPE] == ZFLT_LP && out->p[ZP_CUTOFF] < 30 && out->p[ZP_FLT_ENV] <= 70) out->p[ZP_CUTOFF] = 44;
+    if (out->p[ZP_FLT_TYPE] == ZFLT_HP && out->p[ZP_CUTOFF] > 44) out->p[ZP_CUTOFF] = 44;
+    if (out->p[ZP_FLT_TYPE] == ZFLT_BP && out->p[ZP_CUTOFF] > 100) out->p[ZP_CUTOFF] = 100;
+    if (out->p[ZP_FLT_TYPE] == ZFLT_BP && out->p[ZP_CUTOFF] < 45) out->p[ZP_CUTOFF] = 45;
+    zr_patch_sanitize(out);
+    uint16_t id = zr_crc16(out->p, ZR_PATCH_PARAMS, 0xffff);
+    zr_name_set(out->name, "EVO-0000");
+    for (unsigned k = 0; k < 4; ++k) out->name[4 + k] = hex[(id >> (12 - 4 * k)) & 15];
+}
+
 int zr_patch_valid(const zr_patch *p)
 {
     if (p->type > ZR_PATCH_KIT) return 0;

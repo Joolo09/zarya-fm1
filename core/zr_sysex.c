@@ -8,12 +8,12 @@
 #include "zr_dsp.h"
 
 enum { CMD_HELLO = 1, CMD_GET_BLOB, CMD_PUT_BLOB, CMD_SET_PARAM, CMD_TRANSPORT, CMD_NOTE, CMD_GET_STATUS,
-       CMD_GENERATE, CMD_SELECT,
+       CMD_GENERATE, CMD_SELECT, CMD_LIVE,
        RSP_HELLO = 0x41, RSP_BLOB, RSP_PUT_ACK, RSP_STATUS = 0x47, RSP_GENERATED, EVT_PARAM = 0x4a, EVT_PATCH,
        RSP_ERROR = 0x4f };
 enum { ERR_FRAME = 1, ERR_COMMAND, ERR_ARGS, ERR_BUSY, ERR_BLOB, ERR_DATA };
 enum { CAP_PARAM = 1, CAP_BLOB_GET = 2, CAP_BLOB_PUT = 4, CAP_TRANSPORT = 8, CAP_GENERATE = 16,
-       CAP_PERSIST = 32 /* not offered */, CAP_FLASH = 64 /* never offered */ };
+       CAP_PERSIST = 32 /* not offered */, CAP_FLASH = 64 /* never offered */, CAP_LIVE = 128 };
 enum { FRAME_MAX = 128, PAYLOAD_MAX = 104, CHUNK = 96, BLOB_MAX = ZR_BLOB_HEADER + 260, RING = 8 };
 
 typedef struct { uint8_t cmd, seq, len, data[PAYLOAD_MAX]; } msg_t;
@@ -153,7 +153,7 @@ void zr_sysex_in(const uint8_t *f, unsigned n)
         msg_t *m = push(RSP_HELLO, seq);
         const uint8_t hello[] = {ZR_PROTOCOL_VERSION, ZR_VERSION_MAJOR, ZR_VERSION_MINOR, ZR_VERSION_PATCH,
             ZR_SCHEMA_VERSION, ZR_TRACKS, ZR_VOICES, ZR_STEPS, ZR_SCENES,
-            CAP_PARAM | CAP_BLOB_GET | CAP_BLOB_PUT | CAP_TRANSPORT | CAP_GENERATE, 0,
+            CAP_PARAM | CAP_BLOB_GET | CAP_BLOB_PUT | CAP_TRANSPORT | CAP_GENERATE | CAP_LIVE, 0,
             (uint8_t)zr_store_state(), ZR_PATCH_PARAMS, ZR_GLOBALS,
 #ifdef ZR_TARGET_FM1
             1,
@@ -217,7 +217,9 @@ void zr_sysex_in(const uint8_t *f, unsigned n)
         m->data[6] = zr_status.voices; m->data[7] = zr_status.load; m->data[8] = zr_live.sel_track;
         m->data[9] = (uint8_t)zr_ui_page(); m->data[10] = (uint8_t)zr_store_state(); m->data[11] = zr_live.record;
         m->data[12] = zr_status.peak_master;
-        m->len = 13;
+        m->data[13] = zr_live.degree % 7; m->data[14] = zr_status.pure_root; m->data[15] = zr_status.duet_active;
+        m->data[16] = zr_status.capture_seq; m->data[17] = zr_status.capture_count;
+        m->len = 18;
         break;
     }
     case CMD_GENERATE: {
@@ -239,6 +241,12 @@ void zr_sysex_in(const uint8_t *f, unsigned n)
             if (zr_status.playing) zr_live.scene_req = d[1];
             else zr_proj.g[ZG_SCENE] = d[1];
         }
+        zr_ui_touch();
+        break;
+    case CMD_LIVE: /* op 0: chord degree 0..6; op 1: capture the last phrase of a track */
+        if (len < 2 || d[0] > 1 || (d[0] == 0 && d[1] > 6) || (d[0] == 1 && d[1] >= ZR_TRACKS)) { error(seq, cmd, ERR_ARGS, 0); break; }
+        if (d[0] == 0) zr_live.degree = d[1];
+        else zr_post(ZQ_CONTROL, ZE_CAPTURE, d[1], 0, 0);
         zr_ui_touch();
         break;
     default: error(seq, cmd, ERR_COMMAND, 0); break;

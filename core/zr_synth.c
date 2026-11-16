@@ -167,6 +167,7 @@ ZR_AUDIO_CODE void zr_voice_start(zr_voice *v, const zr_tparams *tp, unsigned no
         v->fenv = 0;
         v->amp_l = v->amp_r = 0;
         v->noise = 0x9e3779b9u ^ (note * 2654435761u);
+        v->tune = v->tune_to = 0;
         v->fresh = 1;
     }
     if (!legato || fresh) {
@@ -223,7 +224,11 @@ ZR_AUDIO_CODE int zr_voice_render(zr_voice *v, const zr_tparams *tp, int32_t ben
         if (!tp->glide_k || (d < 8 && d > -8)) v->pitch_q8 = v->target_q8;
         else v->pitch_q8 += mul24(d, tp->glide_k) + (d > 0 ? 1 : -1);
     }
-    int32_t pitch = v->pitch_q8 + tp->transpose_q8 + bend_q8;
+    if (v->tune != v->tune_to) {
+        int d = v->tune_to - v->tune;
+        v->tune = (int16_t)(v->tune + (d / 4 ? d / 4 : d));
+    }
+    int32_t pitch = v->pitch_q8 + tp->transpose_q8 + bend_q8 + v->tune;
     if (dest == ZLD_PITCH) pitch += (lfo * (int32_t)tp->lfo_depth) >> 11;
     uint32_t base = zr_pitch_inc(pitch);
 

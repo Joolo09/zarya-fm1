@@ -9,9 +9,9 @@
 #include <stdint.h>
 
 #define ZR_VERSION_MAJOR 0
-#define ZR_VERSION_MINOR 1
+#define ZR_VERSION_MINOR 2
 #define ZR_VERSION_PATCH 0
-#define ZR_SCHEMA_VERSION 1 /* patch / pattern / project serialization */
+#define ZR_SCHEMA_VERSION 2 /* patch / pattern / project serialization */
 #define ZR_PROTOCOL_VERSION 1 /* editor SysEx protocol */
 
 #define ZR_SAMPLE_RATE 44100

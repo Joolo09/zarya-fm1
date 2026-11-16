@@ -244,6 +244,24 @@ export class App {
   togglePlay() { if (this.client && (this.mode === 'sim' || this.liveEdit)) { void this.ensureAudio(); this.client.transportCmd(!this.playing); } }
   audition(note: number, on: boolean) { if (this.canSend) { void this.ensureAudio(); this.client!.note(this.track, note, on ? 100 : 0); } }
 
+  // ---------- live ----------
+  conduct(degree: number) { if (this.canSend) { this.client!.conduct(degree); if (this.status) this.status.degree = degree; this.emit(); } }
+  async capture() {
+    if (!this.canSend) return;
+    const scene = this.scene, track = this.track, before = this.status?.captureSeq ?? 0;
+    this.pushUndo(`cap${Date.now()}`);
+    this.genUndo = { scene, track, pattern: clone(this.patterns[scene][track]) };
+    this.client!.capture(track);
+    try {
+      let s = await this.client!.status();
+      for (let i = 0; i < 20 && s.captureSeq === before; i++) { await new Promise((r) => setTimeout(r, 15)); s = await this.client!.status(); }
+      this.status = s;
+      this.patterns[scene][track] = decodePattern(blobUnpack(await this.client!.getBlob(BLOB.PATTERN, scene, track), BLOB.PATTERN, PATTERN_BYTES));
+      this.error = s.captureCount ? '' : 'Nothing to capture: play something on this track first.';
+    } catch (e) { this.error = `Capture failed: ${(e as Error).message}`; }
+    this.emit(true);
+  }
+
   // ---------- generator ----------
   async generate() {
     if (!this.canSend) { this.error = 'The generator runs inside the firmware: connect the simulator or enable Live edit.'; this.emit(); return; }

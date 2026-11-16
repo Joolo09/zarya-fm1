@@ -20,6 +20,14 @@ ZR_AUDIO_CODE unsigned zr_scale_snap(unsigned note, unsigned root, unsigned scal
         if (mask & (1U << ((note - k + 120 - (root % 12)) % 12))) return note - k;
     return note;
 }
+ZR_AUDIO_CODE unsigned zr_scale_shift(unsigned note, unsigned root, unsigned scale, int k)
+{
+    unsigned mask = zr_scale_mask[scale < ZR_SCALE_COUNT ? scale : ZR_SCALE_COUNT - 1];
+    int n = (int)zr_scale_snap(note, root, scale);
+    for (; k > 0 && n < 127; --k) do ++n; while (n < 127 && !(mask & (1U << ((unsigned)(n + 120 - (int)(root % 12)) % 12))));
+    for (; k < 0 && n > 0; ++k) do --n; while (n > 0 && !(mask & (1U << ((unsigned)(n + 120 - (int)(root % 12)) % 12))));
+    return (unsigned)n;
+}
 void zr_pattern_clear(zr_pattern *p, unsigned length)
 {
     zr_zero(p, sizeof *p);

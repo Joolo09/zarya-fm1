@@ -2,7 +2,7 @@
 
 Device / hardware revision: UNKNOWN (устройство не подключалось)
 Current firmware / bootloader: UNKNOWN
-Source / SDK / protocol revision: ZARYA 0.1.0; целевой SDK fm1_open @ 4c7496da (V14); протокол редактора v1
+Source / SDK / protocol revision: ZARYA 0.2.0 (schema 2); целевой SDK fm1_open @ 4c7496da (V14); протокол редактора v1
 Proposed operation and exact target: нет
 Verified backup coverage: NOT VERIFIED
 Verified recovery: NOT VERIFIED

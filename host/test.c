@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
 /* Host test suite for the ZARYA core. Build and run: make test */
-#include "../core/zr_dsp.h"
+#include "../core/zr_eng.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -285,7 +285,7 @@ static void test_ui(void)
     for (unsigned trk = 0; trk < 4; trk += 3)
     for (unsigned p = 0; p < 10; ++p) {
         c.buttons = 1U << btn[p]; zr_control(&c, now += 10); c.buttons = 0; zr_control(&c, now += 10);
-        for (unsigned sub = 0; sub < 7; ++sub) {
+        for (unsigned sub = 0; sub < 8; ++sub) {
             for (unsigned i = 0; i < 240 * 240 + 480; ++i) fb[i] = 0xdead;
             zr_draw(fb + 240, 0, 240);
             for (unsigned i = 0; i < 240; ++i) CHECK(fb[i] == 0xdead && fb[240 + 57600 + i] == 0xdead, "draw overflow");
@@ -339,6 +339,125 @@ static void test_record(void)
     zr_post(ZQ_CONTROL, ZE_STOP, 0xff, 0, 0); render(345 * 4); CHECK(zr_status.voices == 0, "voices end after stop");
 }
 
+static unsigned pop_notes(uint8_t *notes, unsigned max, unsigned status)
+{
+    uint8_t m[3]; unsigned n = 0;
+    while (zr_midi_out_pop(m)) if (m[0] == status && n < max) notes[n++] = m[1];
+    return n;
+}
+static zr_voice *voice_of(unsigned note)
+{
+    for (unsigned i = 0; i < ZR_VOICES; ++i) if (zr_voices[i].state == 1 && zr_voices[i].note == note) return &zr_voices[i];
+    return 0;
+}
+static void test_live(void)
+{
+    uint8_t notes[32]; unsigned n;
+    printf("pure: chords are retuned to just intervals around the detected root, centred, and only when enabled\n");
+    zr_init(&plat); zr_project_init(&zr_proj);
+    for (unsigned t = 0; t < 4; ++t) zr_patch_touch(t);
+    zr_proj.g[ZG_PURE] = 127;
+    static const uint8_t cmaj[3] = {60, 64, 67};
+    for (unsigned k = 0; k < 3; ++k) zr_post(ZQ_CONTROL, ZE_NOTE_ON, 1, cmaj[k], 100);
+    render(30);
+    CHECK(zr_status.pure_root == 0, "root of C-E-G heard as %u", zr_status.pure_root);
+    zr_voice *c = voice_of(60), *e = voice_of(64), *g = voice_of(67);
+    CHECK(c && e && g, "three voices");
+    if (c && e && g) {
+        CHECK(e->tune - c->tune == -35, "major third is %d/256 semitone from the root (want -35 = -13.7 cents)", e->tune - c->tune);
+        CHECK(g->tune - c->tune == 5, "fifth offset %d (want +5 = +2 cents)", g->tune - c->tune);
+        CHECK(abs(c->tune + e->tune + g->tune) <= 3, "chord not centred: %d", c->tune + e->tune + g->tune);
+    }
+    zr_post(ZQ_CONTROL, ZE_NOTE_ON, 1, 70, 100); render(30);
+    zr_voice *b7 = voice_of(70); c = voice_of(60);
+    CHECK(b7 && c && b7->tune - c->tune == -80, "dominant seventh uses the harmonic 7th (%d)", b7 && c ? b7->tune - c->tune : 0);
+    zr_post(ZQ_CONTROL, ZE_PANIC, 0xff, 0, 0); render(4);
+    static const uint8_t amin[3] = {57, 60, 64};
+    for (unsigned k = 0; k < 3; ++k) zr_post(ZQ_CONTROL, ZE_NOTE_ON, 1, amin[k], 100);
+    render(30);
+    CHECK(zr_status.pure_root == 9, "root of A-C-E heard as %u", zr_status.pure_root);
+    CHECK(voice_of(60) && voice_of(57) && voice_of(60)->tune - voice_of(57)->tune == 40, "minor third +15.6 cents");
+    zr_proj.g[ZG_PURE] = 0; render(30);
+    CHECK(voice_of(60) && voice_of(60)->tune == 0 && zr_status.pure_root == 0xff, "PURE off returns to equal temperament");
+
+    printf("chord: one degree re-harmonises every sequenced note in key\n");
+    static const uint8_t want[3][3] = {{60, 64, 67}, {62, 65, 69}, {55, 59, 62}};
+    static const uint8_t degs[3] = {0, 1, 4};
+    for (unsigned k = 0; k < 3; ++k) {
+        zr_init(&plat); zr_project_init(&zr_proj);
+        zr_proj.g[ZG_SCALE] = 0; /* C major */
+        zr_proj.pat[0][1].steps[0] = (zr_step){60, 100, 3, 3 << 3};
+        zr_live.degree = degs[k];
+        zr_post(ZQ_CONTROL, ZE_PLAY, 0xff, 0, 0); render(3);
+        n = pop_notes(notes, 32, 0x91);
+        CHECK(n == 3 && !memcmp(notes, want[k], 3), "degree %u gave %u notes: %u %u %u", degs[k], n, notes[0], notes[1], notes[2]);
+    }
+
+    printf("capture: a phrase played without recording is written into the pattern afterwards\n");
+    zr_init(&plat); zr_project_init(&zr_proj);
+    for (unsigned k = 0; k < 3; ++k) {
+        zr_post(ZQ_CONTROL, ZE_NOTE_ON, 0, 60 + 2 * k, 90 + k); render(10);
+        zr_post(ZQ_CONTROL, ZE_NOTE_OFF, 0, 60 + 2 * k, 0); render(76);
+    }
+    zr_pattern empty = zr_proj.pat[0][0];
+    CHECK(!empty.steps[0].note, "nothing recorded yet");
+    zr_post(ZQ_CONTROL, ZE_CAPTURE, 0, 0, 0); render(2);
+    const zr_step *st = zr_proj.pat[0][0].steps;
+    CHECK(zr_status.capture_count == 3 && st[0].note == 60 && st[2].note == 62 && st[4].note == 64 && !st[1].note && !st[3].note,
+          "captured %u: %u %u %u %u %u", zr_status.capture_count, st[0].note, st[1].note, st[2].note, st[3].note, st[4].note);
+    CHECK(st[0].vel == 90 && st[2].vel == 91, "velocities kept");
+    zr_post(ZQ_CONTROL, ZE_CAPTURE, 2, 0, 0); render(2);
+    CHECK(zr_status.capture_count == 0, "nothing to capture on a silent track");
+
+    printf("duet: the instrument answers a played phrase one bar later, in key\n");
+    for (unsigned mode = ZDUET_ECHO; mode <= ZDUET_WILD; ++mode) {
+        zr_init(&plat); zr_project_init(&zr_proj);
+        zr_proj.g[ZG_SCALE] = 0; zr_proj.g[ZG_DUET] = (uint8_t)mode; zr_proj.g[ZG_DUET_VAR] = 60;
+        static const uint8_t call[4] = {60, 64, 67, 72};
+        unsigned total = 0, blocks = 0, first_answer = 0;
+        uint8_t all[32];
+        for (unsigned b = 0; b < 689 * 2 + 200; ++b, ++blocks) {
+            if (b % 86 == 0 && b / 86 < 4) zr_post(ZQ_CONTROL, ZE_NOTE_ON, 0, call[b / 86], 100);
+            if (b % 86 == 20 && b / 86 < 4) zr_post(ZQ_CONTROL, ZE_NOTE_OFF, 0, call[b / 86], 0);
+            render(1);
+            n = pop_notes(notes, 8, 0x90);
+            for (unsigned i = 0; i < n && total < 32; ++i) { if (total == 4 && !first_answer) first_answer = b; all[total++] = notes[i]; }
+        }
+        CHECK(total == 8, "mode %u: %u notes heard (4 played + 4 answered)", mode, total);
+        CHECK(first_answer >= 680 && first_answer <= 700, "mode %u: answer began at block %u (one bar = 689)", mode, first_answer);
+        for (unsigned i = 4; i < total; ++i) CHECK(zr_scale_snap(all[i], 0, 0) == all[i], "mode %u: answer note %u out of key", mode, all[i]);
+        if (mode == ZDUET_ANSWER && total == 8) CHECK(all[4] == 60 && all[5] == 64 && all[6] == 65 && all[7] == 72, "answer %u %u %u %u", all[4], all[5], all[6], all[7]);
+        if (mode == ZDUET_MIRROR && total == 8) CHECK(all[4] == 60 && all[5] == 55 && all[6] == 53 && all[7] == 48, "mirror %u %u %u %u", all[4], all[5], all[6], all[7]);
+        render(3000); CHECK(zr_status.voices == 0, "duet leaves no stuck voice");
+    }
+    zr_init(&plat); zr_project_init(&zr_proj);
+    zr_post(ZQ_CONTROL, ZE_NOTE_ON, 0, 60, 100); render(20); zr_post(ZQ_CONTROL, ZE_NOTE_OFF, 0, 60, 0); render(1500);
+    CHECK(pop_notes(notes, 32, 0x90) == 1, "no answer when DUET is off");
+
+    printf("evolve: every bred sound is valid, reproducible and audible\n");
+    unsigned changed = 0, quiet = 0;
+    for (unsigned seed = 0; seed < 240; ++seed) {
+        zr_patch a, m, c1, c2;
+        zr_factory_patch(&a, seed, 0); zr_factory_patch(&m, seed * 7 + 3, 0);
+        unsigned amount = seed % 3 == 0 ? 20 : seed % 3 == 1 ? 64 : 127;
+        zr_patch_breed(&c1, &a, seed & 1 ? &m : 0, amount, seed);
+        zr_patch_breed(&c2, &a, seed & 1 ? &m : 0, amount, seed);
+        CHECK(zr_patch_valid(&c1), "child %u invalid", seed);
+        CHECK(!memcmp(&c1, &c2, sizeof c1), "breeding not deterministic");
+        if (memcmp(c1.p, a.p, ZR_PATCH_PARAMS)) ++changed;
+        if (seed % 4) continue;
+        zr_init(&plat); zr_project_init(&zr_proj); zr_load_patch(0, &c1);
+        zr_proj.g[ZG_REV_LEVEL] = 0; zr_proj.g[ZG_DLY_LEVEL] = 0;
+        reset_meter();
+        zr_post(ZQ_CONTROL, ZE_NOTE_ON, 0, 55, 110); zr_post(ZQ_CONTROL, ZE_NOTE_ON, 0, 62, 110);
+        render(345);
+        if (db(peak) < -30) ++quiet; /* peak, so that short plucks count as audible */
+        CHECK(peak < 8388000, "child %u clips", seed);
+    }
+    CHECK(changed > 220, "only %u of 240 children differ from the parent", changed);
+    CHECK(quiet == 0, "%u of 60 children are inaudible", quiet);
+}
+
 static void dump_schema(const char *path)
 {
     FILE *f = fopen(path, "w");
@@ -364,7 +483,7 @@ int main(int argc, char **argv)
 {
     if (argc == 3 && !strcmp(argv[1], "--schema")) { dump_schema(argv[2]); return 0; }
     memset(flash, 0xff, FLASH);
-    test_presets(); test_determinism(); test_stress(); test_generator(); test_storage(); test_protocol(); test_ui(); test_record();
+    test_presets(); test_determinism(); test_stress(); test_generator(); test_storage(); test_protocol(); test_ui(); test_record(); test_live();
     printf("%d checks, %d failed\n", checks, fails);
     return fails != 0;
 }

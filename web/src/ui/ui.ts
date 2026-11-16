@@ -23,7 +23,7 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, 
   return e;
 }
 const TRACK_COLORS = ['#cbf36b', '#5adbcb', '#ff846c', '#ffc857'];
-const PAGES = ['Device', 'Sound Lab', 'Sequencer', 'Melody Lab', 'Mixer & FX', 'Library', 'Backup', 'Diagnostics'] as const;
+const PAGES = ['Device', 'Sound Lab', 'Sequencer', 'Melody Lab', 'Live', 'Mixer & FX', 'Library', 'Backup', 'Diagnostics'] as const;
 type Page = (typeof PAGES)[number];
 
 let updaters: (() => void)[] = [];
@@ -303,6 +303,28 @@ export function mount(app: App, root: HTMLElement) {
           h('button', { onclick: () => app.togglePlay(), disabled: !app.canSend }, app.playing ? 'Stop' : 'Audition'))),
       card('Pattern', roll(() => app.patterns[app.scene][app.track], isKit(app.track))));
   }
+  function livePage(): HTMLElement {
+    const G = globalId, ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
+    const degs = ROMAN.map((r, i) => h('button', { 'aria-label': `Chord ${r}`, disabled: !app.canSend, onclick: () => app.conduct(i) }, r));
+    const heard = h('span', { class: 'pill', style: 'font-family:var(--mono)' });
+    const duet = h('span', { class: 'pill' });
+    onUpdate(() => {
+      const s = app.status;
+      degs.forEach((b, i) => { b.className = (s?.degree ?? 0) === i ? 'on' : ''; });
+      heard.textContent = s && s.pureRoot < 12 ? `hears root: ${['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][s.pureRoot]}` : 'hears root: —';
+      duet.textContent = s?.duet ? 'answering…' : 'listening';
+    });
+    return h('div', { class: 'grid' },
+      card('PURE — adaptive just intonation', h('p', { class: 'muted' }, 'The instrument listens to every note that sounds, finds the root of the chord and bends each voice to pure intervals (major third −14 cents, harmonic seventh on dominant chords), keeping the chord as a whole at concert pitch. FM chords stop beating. 0 = equal temperament.'),
+        h('div', { class: 'row' }, gp(G('PURE')), heard)),
+      card('DUET — it answers what you play', h('p', { class: 'muted' }, 'Play a phrase on the selected track; one bar later the instrument replies. ECHO repeats, ANSWER keeps your opening and resolves to the tonic, MIRROR inverts the melody around its first note, WILD improvises in key.'),
+        h('div', { class: 'row' }, gp(G('DUET')), gp(G('DUET VAR')), duet)),
+      card('CHORD — one finger moves the whole song', h('p', { class: 'muted' }, 'Every sequenced bass line, arpeggio and chord moves to that degree of the key; chords are rebuilt from the scale, so IV in a minor key is minor. On the FM-1: hold SCL and press one of the first seven white keys.'),
+        h('div', { class: 'row' }, ...degs)),
+      card('CAPTURE — record after the fact', h('p', { class: 'muted' }, 'The instrument always remembers the last phrase you played. Liked it? Capture writes it into the pattern of the selected track. On the FM-1: hold GLO and press REC.'),
+        h('div', { class: 'row' }, h('button', { class: 'primary', disabled: !app.canSend, onclick: () => void app.capture() }, `Capture to track ${app.track + 1}`), h('button', { disabled: !app.genUndo, onclick: () => app.undoGenerate() }, 'Undo'))),
+      card('EVOLVE — breed sounds', h('p', { class: 'muted' }, 'On the instrument (Device tab): EDIT, turn ALGORITHM to EVOLVE, then turn KNOB 3 (PICK) to hear four children of the current sound. SAVE breeds the next generation from the one you picked; KNOB 2 chooses a second parent; REC returns to the original.')));
+  }
   function mixerPage(): HTMLElement {
     const G = globalId;
     const strips = [0, 1, 2, 3].map((t) => {
@@ -370,7 +392,7 @@ export function mount(app: App, root: HTMLElement) {
     const active = document.activeElement?.getAttribute('aria-label');
     const tc = TRACK_COLORS[app.track];
     const body = page === 'Device' ? devicePage() : page === 'Sound Lab' ? soundPage() : page === 'Sequencer' ? seqPage_() : page === 'Melody Lab' ? melodyPage()
-      : page === 'Mixer & FX' ? mixerPage() : page === 'Library' ? libraryPage() : page === 'Backup' ? backupPage() : diagPage();
+      : page === 'Live' ? livePage() : page === 'Mixer & FX' ? mixerPage() : page === 'Library' ? libraryPage() : page === 'Backup' ? backupPage() : diagPage();
     const parts: Child[] = [header(),
       app.mode === 'sim' ? h('div', { class: 'banner' }, 'Demo mode: you are editing a firmware simulator in the browser, not an FM-1.') : null,
       app.error ? h('div', { class: 'banner err', role: 'alert' }, app.error, h('button', { onclick: () => { app.error = ''; app.emit(true); } }, 'Dismiss')) : null,

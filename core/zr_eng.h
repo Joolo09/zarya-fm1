@@ -47,6 +47,7 @@ typedef struct zr_voice {
     uint32_t lfo_phase, noise;
     int32_t lfo_fade, lfo_sh;
     int16_t pan_off;
+    int16_t tune, tune_to; /* PURE: adaptive just-intonation offset, 1/256 semitone */
 } zr_voice;
 
 typedef struct {
