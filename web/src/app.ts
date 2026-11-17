@@ -6,6 +6,7 @@ import { BLOB, PATCH_BYTES, PATTERN_BYTES, blobPack, blobUnpack, clampParam, dec
 import { Client, type Identity, type Status, type Transport } from './core/protocol';
 import { Fm1Sim, SimTransport } from './transport/sim';
 import { WebMidiTransport, type PortPair } from './transport/webmidi';
+import workletUrl from './assets/ring-worklet.js?url';
 
 export interface Snapshot { patches: Patch[]; globals: number[]; patterns: Pattern[][] }
 export interface LibraryEntry { id: string; patch: Patch; savedAt: number }
@@ -41,6 +42,10 @@ export class App {
   private listeners = new Set<(structural: boolean) => void>();
   private audio: { ctx: AudioContext; node: AudioWorkletNode; rendered: number; start: number } | null = null;
   private timers: ReturnType<typeof setInterval>[] = [];
+  /** Called for every audio block the simulator renders: 128 stereo frames, interleaved, -1..1. */
+  onBlock: ((block: Float32Array) => void) | null = null;
+  /** When false nothing is written to browser storage (used by the project site's demos). */
+  persist = true;
 
   subscribe(fn: (structural: boolean) => void) { this.listeners.add(fn); }
   emit(structural = false) { for (const fn of this.listeners) fn(structural); }
@@ -290,8 +295,8 @@ export class App {
     this.persistLibrary();
   }
   deleteFromLibrary(id: string) { this.library = this.library.filter((e) => e.id !== id); this.persistLibrary(); }
-  private persistLibrary() { try { localStorage.setItem(LIB_KEY, JSON.stringify(this.library)); } catch { this.error = 'Browser storage is full or blocked.'; } this.emit(true); }
-  private saveDraft() { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(this.exportProject())); } catch { /* drafts are best effort */ } }
+  private persistLibrary() { if (!this.persist) { this.emit(true); return; } try { localStorage.setItem(LIB_KEY, JSON.stringify(this.library)); } catch { this.error = 'Browser storage is full or blocked.'; } this.emit(true); }
+  private saveDraft() { if (!this.persist) return; try { localStorage.setItem(DRAFT_KEY, JSON.stringify(this.exportProject())); } catch { /* drafts are best effort */ } }
   hasDraft() { try { return !!localStorage.getItem(DRAFT_KEY); } catch { return false; } }
   async restoreDraft() { const raw = localStorage.getItem(DRAFT_KEY); if (raw) await this.importProject(raw); }
   exportProject(): ProjectFile {
@@ -341,6 +346,7 @@ export class App {
         const src = this.sim.audio(), f = new Float32Array(256);
         const gain = this.mode === 'sim' ? 1 / 8388608 : 0; // the simulator is silent while hardware is connected
         for (let i = 0; i < 256; i++) f[i] = src[i] * gain;
+        this.onBlock?.(f);
         a.node.port.postMessage(f, [f.buffer]);
       }
     }
@@ -349,7 +355,7 @@ export class App {
     if (this.audio) { if (this.audio.ctx.state !== 'running') await this.audio.ctx.resume(); return; }
     if (!this.sim || typeof AudioContext === 'undefined') return;
     const ctx = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
-    await ctx.audioWorklet.addModule(new URL('./ring-worklet.js', document.baseURI).href);
+    await ctx.audioWorklet.addModule(workletUrl);
     const node = new AudioWorkletNode(ctx, 'ring', { outputChannelCount: [2] });
     node.connect(ctx.destination);
     this.audio = { ctx, node, rendered: 0, start: ctx.currentTime };

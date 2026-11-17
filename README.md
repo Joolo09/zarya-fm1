@@ -4,6 +4,8 @@
 редактор написаны с нуля. Для железа используется только официальный SDK M-VAVE
 (`m-vave/fm1_open`) — он отвечает за загрузку, USB/Bluetooth и штатное обновление.
 
+**Сайт с живым демо: https://joolo09.github.io/zarya-fm1/ · редактор: https://joolo09.github.io/zarya-fm1/editor/**
+
 **Статус: исходники и симулятор работают; под само устройство НЕ собрано и НЕ прошивалось.
 См. `docs/SAFETY_STATUS.md` — сейчас `NO-GO: DO NOT FLASH`.**
 
@@ -56,7 +58,8 @@ make wasm schema
 cd web && npm install && npm run dev
 ```
 
-Откройте http://localhost:5173 в Chrome или Edge. `npm test` — контрактные тесты редактора
+Откройте http://localhost:5173 (сайт) или http://localhost:5173/editor/ (редактор) в Chrome или Edge.
+Сайт публикуется скриптом `tools/publish_site.sh` в ветку `gh-pages`. `npm test` — контрактные тесты редактора
 против прошивки, `npm run build` — сборка в `web/dist`.
 
 ## Управление на устройстве

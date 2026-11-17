@@ -6,7 +6,7 @@ import { BLOB, PATCH_BYTES, PATTERN_BYTES, blobPack, blobUnpack, crc16, decodePa
 import { CAP, Client, decodeFrame, encodeFrame, pack7, unpack7 } from '../src/core/protocol';
 import { Fm1Sim, SimTransport } from '../src/transport/sim';
 
-const wasm = readFileSync(new URL('../public/zarya.wasm', import.meta.url));
+const wasm = readFileSync(new URL('../src/assets/zarya.wasm', import.meta.url));
 async function connect() {
   const sim = await Fm1Sim.create(wasm);
   const client = new Client(new SimTransport(sim), 500);

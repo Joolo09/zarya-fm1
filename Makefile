@@ -15,9 +15,9 @@ schema: build/test
 	./build/test --schema web/src/core/schema.json
 # Freestanding WebAssembly build of the same core (the web editor's simulator).
 wasm: $(CORE) $(HDRS) wasm/glue.c
-	@mkdir -p web/public
+	@mkdir -p web/src/assets
 	clang --target=wasm32 -std=c99 -O2 -ffreestanding -fno-builtin -nostdlib -Wall -Wextra \
 	  -Wl,--no-entry -fvisibility=hidden -Wl,--export-dynamic -Wl,-z,stack-size=65536 -Wl,--initial-memory=2097152 \
-	  $(CORE) wasm/glue.c -o web/public/zarya.wasm
+	  $(CORE) wasm/glue.c -o web/src/assets/zarya.wasm
 clean:
 	rm -rf build
