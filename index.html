@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZARYA — прошивка для M-VAVE FM-1</title>
+<meta name="description" content="ZARYA — оригинальная прошивка и веб-редактор для карманного FM-синтезатора M-VAVE FM-1: адаптивный чистый строй, ответ на сыгранную фразу, запись задним числом, скрещивание звуков. Работает в симуляторе; под устройство ещё не собрана.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;700;800&display=swap" rel="stylesheet">
+  <script type="module" crossorigin src="./assets/site-AAKHo86j.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/zarya-C1TKama_.js">
+  <link rel="stylesheet" crossorigin href="./assets/site-DsmBbcT4.css">
+</head>
+<body>
+<a class="skip" href="#live" data-i18n="skip">К содержанию</a>
+
+<header class="nav">
+  <a class="nav-brand" href="#top">ZARYA</a>
+  <nav aria-label="Разделы">
+    <a href="#live" data-i18n="nav.live">Функции</a>
+    <a href="#engine" data-i18n="nav.engine">Движок</a>
+    <a href="#editor" data-i18n="nav.editor">Редактор</a>
+    <a href="#install" data-i18n="nav.install">Установка</a>
+    <a href="https://github.com/Joolo09/zarya-fm1">GitHub</a>
+  </nav>
+  <button id="lang" class="ghost" type="button" aria-label="Switch language">EN</button>
+</header>
+
+<main id="top">
+<section class="hero">
+  <div class="horizon" aria-hidden="true"></div>
+  <div class="hero-copy">
+    <p class="label" data-i18n="hero.eyebrow">Прошивка для M-VAVE FM-1 · v0.2</p>
+    <h1 class="wordmark">ZARYA</h1>
+    <p class="lead" data-i18n="hero.lead">Карманный FM-синтезатор, который слушает, что вы играете: подтягивает аккорды к чистому строю, отвечает на ваши фразы и помнит то, что вы не успели записать.</p>
+    <p class="status-line"><span class="dot" aria-hidden="true"></span><span data-i18n="hero.status">Работает в симуляторе. Под само устройство ещё не собрана — <a href="#install">что это значит</a>.</span></p>
+    <div class="cta">
+      <button id="play" class="primary" type="button">▶ Включить демо</button>
+      <a class="button" href="./editor/" data-i18n="hero.editor">Открыть редактор</a>
+    </div>
+  </div>
+  <div class="hero-device">
+    <div class="device">
+      <canvas id="lcd" width="240" height="240" role="img" aria-label="Экран FM-1 с работающей прошивкой ZARYA"></canvas>
+      <div class="chips" role="group" aria-label="Кнопки панели">
+        <button type="button" data-btn="8">HOME</button><button type="button" data-btn="6">SOUND</button><button type="button" data-btn="11">SEQ</button>
+        <button type="button" data-btn="3">SCALE</button><button type="button" data-btn="7">MIX</button><button type="button" data-btn="2">FX</button>
+      </div>
+      <div class="chips" role="group" aria-label="Энкодеры">
+        <span class="enc"><button type="button" data-enc="0" data-dir="-1" aria-label="SELECT −">−</button><i>TRACK</i><button type="button" data-enc="0" data-dir="1" aria-label="SELECT +">+</button></span>
+        <span class="enc"><button type="button" data-enc="6" data-dir="-1" aria-label="PRESETS −">−</button><i>SOUND</i><button type="button" data-enc="6" data-dir="1" aria-label="PRESETS +">+</button></span>
+        <span class="enc"><button type="button" data-enc="1" data-dir="-1" aria-label="ALGORITHM −">−</button><i>PAGE</i><button type="button" data-enc="1" data-dir="1" aria-label="ALGORITHM +">+</button></span>
+      </div>
+    </div>
+    <p class="caption" data-i18n="hero.caption">Это не видео. На экране работает настоящий код прошивки, собранный в WebAssembly. Включите демо и листайте звуки.</p>
+  </div>
+</section>
+
+<section id="live" class="band">
+  <div class="wrap">
+    <p class="label" data-i18n="live.label">Живые функции</p>
+    <h2 data-i18n="live.title">Пять вещей, которых мы не нашли больше нигде</h2>
+    <p class="sub" data-i18n="live.sub">В каталоге сообщества FM-1 больше 80 прошивок. Адаптивного чистого строя, ответа на сыгранную фразу, записи задним числом и скрещивания звуков среди них нет. Смена аккорда всей песни встречается — здесь она сделана по ладу.</p>
+
+    <article class="feature" style="--fc:var(--cyan)">
+      <div class="feature-copy">
+        <p class="label fc">PURE</p>
+        <h3 data-i18n="pure.title">Аккорды без биений</h3>
+        <p data-i18n="pure.text">В обычном строе большая терция завышена на 14 центов. На ярком FM-тембре это слышно как дрожь внутри аккорда. PURE на лету находит тонику того, что звучит, и подтягивает каждый голос к чистым интервалам — а аккорд целиком остаётся в общем строе с другими инструментами.</p>
+        <p class="proof" data-i18n="pure.proof">Измерено на симуляторе: общая гармоника терции бьётся с глубиной 83% в обычном строе и 3% с PURE.</p>
+      </div>
+      <div class="module">
+        <p class="label">C7 · <span id="pure-root">—</span></p>
+        <canvas id="pure-scope" width="520" height="120" role="img" aria-label="Громкость общей гармоники терции во времени"></canvas>
+        <p class="hint" data-i18n="pure.scope">Громкость общей гармоники терции: волны — это биения.</p>
+        <div class="row">
+          <button type="button" id="pure-et" data-i18n="pure.et">Обычный строй</button>
+          <button type="button" id="pure-on" class="fc-btn" data-i18n="pure.on">PURE</button>
+        </div>
+      </div>
+    </article>
+
+    <article class="feature" style="--fc:var(--coral)">
+      <div class="feature-copy">
+        <p class="label fc">DUET</p>
+        <h3 data-i18n="duet.title">Отвечает на вашу фразу</h3>
+        <p data-i18n="duet.text">Сыграйте такт — через такт инструмент ответит. ECHO повторит, ANSWER сохранит начало и приведёт фразу в тонику, MIRROR перевернёт мелодию вокруг первой ноты, WILD сымпровизирует в ладу.</p>
+      </div>
+      <div class="module">
+        <p class="label"><span data-i18n="duet.you">вы</span> → <span class="fc" data-i18n="duet.it">инструмент</span> · <span id="duet-state">—</span></p>
+        <canvas id="duet-roll" width="520" height="120" role="img" aria-label="Сыгранная фраза и ответ инструмента"></canvas>
+        <div class="row">
+          <label class="select"><span class="label" data-i18n="duet.mode">Режим</span>
+            <select id="duet-mode"><option value="1">ECHO</option><option value="2" selected>ANSWER</option><option value="3">MIRROR</option><option value="4">WILD</option></select></label>
+          <button type="button" id="duet-play" class="fc-btn" data-i18n="duet.play">Сыграть фразу</button>
+        </div>
+      </div>
+    </article>
+
+    <article class="feature" style="--fc:var(--amber)">
+      <div class="feature-copy">
+        <p class="label fc">CHORD</p>
+        <h3 data-i18n="chord.title">Вся песня одним пальцем</h3>
+        <p data-i18n="chord.text">Удерживайте SCL и нажмите белую клавишу: бас, арпеджио и аккорды всех дорожек переезжают на эту ступень лада. Аккорды собираются заново из нот лада, поэтому IV в миноре останется минорной.</p>
+      </div>
+      <div class="module">
+        <p class="label" data-i18n="chord.label">Ступень лада · демо играет</p>
+        <div class="degrees" id="degrees" role="group" aria-label="Ступень"></div>
+        <p class="hint" data-i18n="chord.hint">Нажмите ступень: демо-трек сменит гармонию на следующем шаге.</p>
+      </div>
+    </article>
+
+    <article class="feature" style="--fc:var(--lime)">
+      <div class="feature-copy">
+        <p class="label fc">CAPTURE</p>
+        <h3 data-i18n="capture.title">Запись задним числом</h3>
+        <p data-i18n="capture.text">Инструмент всегда помнит последнюю фразу. Получилось хорошо, а запись была выключена? GLO + REC — и она уже в паттерне, на своих шагах. С отменой.</p>
+      </div>
+      <div class="module shot">
+        <canvas id="shot-capture" width="240" height="240" role="img" aria-label="Экран секвенсора после CAPTURE: три сыгранные ноты стоят на шагах 1, 3 и 5"></canvas>
+        <p class="hint" data-i18n="capture.hint">Экран прошивки после CAPTURE: три ноты, сыгранные без записи, встали на шаги 1, 3 и 5.</p>
+      </div>
+    </article>
+
+    <article class="feature" style="--fc:var(--text)">
+      <div class="feature-copy">
+        <p class="label fc">EVOLVE</p>
+        <h3 data-i18n="evolve.title">Скрещивание звуков</h3>
+        <p data-i18n="evolve.text">Четыре потомка текущего звука, по желанию — второй родитель из заводских. Слушаете, выбираете лучшего, выводите следующее поколение. Вернуться к оригиналу можно в любой момент.</p>
+      </div>
+      <div class="module shot">
+        <canvas id="shot-evolve" width="240" height="240" role="img" aria-label="Экран EVOLVE: родитель и четыре потомка с отпечатками параметров"></canvas>
+        <p class="hint" data-i18n="evolve.hint">Экран EVOLVE: столбики — «отпечаток» звука, жёлтым отмечено то, чем потомок отличается от родителя.</p>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section id="engine" class="band alt">
+  <div class="wrap">
+    <p class="label" data-i18n="engine.label">Движок</p>
+    <h2 data-i18n="engine.title">Что внутри</h2>
+    <div class="cols">
+      <div>
+        <h3 data-i18n="engine.sound">Звук</h3>
+        <ul>
+          <li data-i18n="engine.s1">4 дорожки: три синта на 8 общих голосов и драм-машина из 8 синтезированных инструментов</li>
+          <li data-i18n="engine.s2">4 оператора FM, 8 алгоритмов, 8 форм волны на оператор</li>
+          <li data-i18n="engine.s3">Резонансный фильтр с огибающей, LFO, 4 макроса на звук</li>
+          <li data-i18n="engine.s4">Дилей по темпу, ревер, drive, DJ-фильтр, pump от бочки</li>
+          <li data-i18n="engine.s5">33 пресета и 4 драм-кита</li>
+        </ul>
+      </div>
+      <div>
+        <h3 data-i18n="engine.seq">Секвенсор</h3>
+        <ul>
+          <li data-i18n="engine.q1">64 шага, 8 сцен, у каждой дорожки своя длина</li>
+          <li data-i18n="engine.q2">Свинг, вероятность, рэтчеты, аккорд на шаг</li>
+          <li data-i18n="engine.q3">Запись вживую и по шагам, арпеджиатор, привязка к ладу</li>
+          <li data-i18n="engine.q4">Генератор: одно зерно — согласованные бас, аккорды, арпеджио и мелодия</li>
+        </ul>
+      </div>
+      <div>
+        <h3 data-i18n="engine.safe">Надёжность</h3>
+        <ul>
+          <li data-i18n="engine.r1">Только целочисленная математика: звук бит-в-бит одинаков в тестах и в браузере</li>
+          <li data-i18n="engine.r2">90 578 автоматических проверок ядра</li>
+          <li data-i18n="engine.r3">Сохранения в двух копиях: тест обрывает питание в каждой точке записи</li>
+          <li data-i18n="engine.r4">Чужие данные во флеше не трогаются без явного FORMAT на устройстве</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="editor" class="band">
+  <div class="wrap editor">
+    <div>
+      <p class="label" data-i18n="editor.label">Редактор</p>
+      <h2 data-i18n="editor.title">Весь синтезатор в браузере</h2>
+      <p data-i18n="editor.text">Sound Lab, секвенсор, Melody Lab, Live, микшер, библиотека звуков и бэкап проекта. Работает без установки и без FM-1 — с симулятором прошивки внутри.</p>
+      <p data-i18n="editor.midi">С устройством соединяется по Web MIDI (Chrome, Edge) и делает только временные правки. Записать что-то в память FM-1 или прошить его редактор не умеет — таких команд в нём нет.</p>
+      <a class="button primary" href="./editor/" data-i18n="hero.editor">Открыть редактор</a>
+    </div>
+    <a class="frame" href="./editor/"><img src="./assets/editor-CFrhJQ8E.jpg" width="1280" height="760" loading="lazy" alt="Sound Lab в редакторе ZARYA: ручки операторов, огибающие, фильтр и LFO"></a>
+  </div>
+</section>
+
+<section id="install" class="band alt">
+  <div class="wrap">
+    <p class="label" data-i18n="install.label">Установка</p>
+    <h2 data-i18n="install.title">Что можно поставить сегодня</h2>
+    <div class="install">
+      <div class="card ok">
+        <p class="label" data-i18n="install.now.label">Готово</p>
+        <h3 data-i18n="install.now.title">Редактор и симулятор</h3>
+        <p data-i18n="install.now.text">Ничего ставить не нужно: откройте редактор в Chrome или Edge. Чтобы запустить у себя и менять код — три команды:</p>
+<pre><code>git clone https://github.com/Joolo09/zarya-fm1
+cd zarya-fm1 && make test wasm schema
+cd web && npm install && npm run dev</code></pre>
+        <a class="button" href="./editor/" data-i18n="hero.editor">Открыть редактор</a>
+      </div>
+      <div class="card nogo">
+        <p class="label" data-i18n="install.fw.label">NO-GO · прошивать нечего</p>
+        <h3 data-i18n="install.fw.title">Прошивка в FM-1</h3>
+        <p data-i18n="install.fw.text">Файла прошивки пока не существует, поэтому установщика здесь нет. Чего не хватает:</p>
+        <ul>
+          <li data-i18n="install.fw.1">образ под процессор FM-1 не собран — нужен тулчейн JieLi и официальный SDK M-VAVE;</li>
+          <li data-i18n="install.fw.2">адаптер к SDK написан, но ни разу не компилировался;</li>
+          <li data-i18n="install.fw.3">на настоящем устройстве код не запускался ни разу.</li>
+        </ul>
+        <button type="button" disabled aria-describedby="install-why" data-i18n="install.fw.button">Установить на FM-1</button>
+        <p class="hint" id="install-why" data-i18n="install.fw.why">Кнопка заработает, когда появится собранный образ с контрольной суммой и проверенный способ вернуться на заводскую прошивку.</p>
+      </div>
+      <div class="card">
+        <p class="label" data-i18n="install.pre.label">Перед любой прошивкой</p>
+        <h3 data-i18n="install.pre.title">Чек-лист</h3>
+        <ul>
+          <li data-i18n="install.pre.1">Сохраните проекты, сэмплы и голоса в <a href="https://open.m-vave.com/fm1-workbench">официальном workbench</a>: ZARYA хранит данные в том же разделе в другом формате.</li>
+          <li data-i18n="install.pre.2">Убедитесь, что для вашей ревизии есть рабочий возврат на заводскую V15 и способ аварийного восстановления.</li>
+          <li data-i18n="install.pre.3">Сверьте SHA-256 образа и не отключайте питание во время записи.</li>
+          <li data-i18n="install.pre.4">У новых FM-1 с флеш-памятью UC25HQ80 сообщество описывает проблемы с частью кастомных прошивок — проверяйте совместимость отдельно.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <p class="label" data-i18n="install.help.label">Можно помочь</p>
+        <h3 data-i18n="install.help.title">Собрать под железо</h3>
+        <p data-i18n="install.help.text">Нужны Windows, тулчейн JieLi 2.5.3 и комплект fm1_open. Порядок и список того, что ещё не проверено, — в <a href="https://github.com/Joolo09/zarya-fm1/blob/main/device/README.md">device/README.md</a>. Ошибки линковки присылайте в Issues.</p>
+        <a class="button" href="https://github.com/Joolo09/zarya-fm1/blob/main/docs/SAFETY_STATUS.md" data-i18n="install.help.status">Текущий статус безопасности</a>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p><strong>ZARYA</strong> · <span data-i18n="foot.text">независимый проект. «M-VAVE» и «FM-1» — товарные знаки их владельцев. Код — GPL-3.0 с исключением для FM1 SDK.</span></p>
+    <p><a href="https://github.com/Joolo09/zarya-fm1">github.com/Joolo09/zarya-fm1</a></p>
+  </div>
+</footer>
+</body>
+</html>
